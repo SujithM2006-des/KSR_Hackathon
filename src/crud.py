@@ -24,6 +24,7 @@ from database import DATA_DIR
 from models import (
     AuditLog,
     ConsentRecord,
+    CredentialDocument,
     ExercisePlan,
     Invitation,
     Patient,
@@ -115,36 +116,95 @@ def create_therapist(
     return user
 
 
-def save_credential_document(db: DbSession, profile: TherapistProfile, filename, content_type, data: bytes):
-    """Store the uploaded credential ENCRYPTED on disk under a random name; keep only that name in the DB."""
+# Documents each profession must provide before an admin can approve the account.
+DOCUMENT_LABELS = {
+    "NEET": "NEET exam certificate / scorecard",
+    "MEDICAL_REGISTRATION": "Medical practice registration certificate (NMC / State Medical Council)",
+    "PHYSIO_REGISTRATION": "Physiotherapy council registration certificate",
+}
+REQUIRED_DOCUMENTS = {
+    "DOCTOR": ["NEET", "MEDICAL_REGISTRATION"],
+    "PHYSIOTHERAPIST": ["PHYSIO_REGISTRATION"],
+}
+
+
+def required_documents(profession):
+    return REQUIRED_DOCUMENTS.get(profession, [])
+
+
+def registration_kind(profession):
+    """The practice-registration document of a profession (the old single upload maps to this)."""
+    return "MEDICAL_REGISTRATION" if profession == "DOCTOR" else "PHYSIO_REGISTRATION"
+
+
+def credential_documents(db: DbSession, profile: TherapistProfile):
+    rows = db.query(CredentialDocument).filter(CredentialDocument.profile_id == profile.id).all()
+    return sorted(rows, key=lambda d: d.id)
+
+
+def missing_documents(db: DbSession, profile: TherapistProfile):
+    have = {d.kind for d in credential_documents(db, profile)}
+    return [k for k in required_documents(profile.profession) if k not in have]
+
+
+def save_credential_document(db: DbSession, profile: TherapistProfile, kind, filename, content_type, data: bytes,
+                             uploaded_by_id=None):
+    """Store one certificate ENCRYPTED on disk under a random name; a new upload replaces the same kind."""
+    if kind not in DOCUMENT_LABELS:
+        raise ValueError(f"Unknown document kind {kind}")
     os.makedirs(CREDENTIAL_DIR, exist_ok=True)
     stored_name = f"{uuid.uuid4().hex}.enc"
     with open(os.path.join(CREDENTIAL_DIR, stored_name), "wb") as f:
         f.write(encrypt_bytes(data))
 
-    old = profile.document_file
-    profile.document_file = stored_name
-    profile.document_name = os.path.basename(filename or "document")
-    profile.document_type = content_type
+    old = [d for d in credential_documents(db, profile) if d.kind == kind]
+    doc = CredentialDocument(
+        profile_id=profile.id,
+        uploaded_by_id=uploaded_by_id,
+        kind=kind,
+        file=stored_name,
+        name=os.path.basename(filename or "document"),
+        content_type=content_type,
+        uploaded_at=datetime.utcnow(),
+    )
+    db.add(doc)
+    for d in old:
+        db.delete(d)
     db.commit()
-
-    if old:  # remove the previous version of the document
+    for d in old:  # remove the previous version of the file
         try:
-            os.remove(os.path.join(CREDENTIAL_DIR, old))
+            os.remove(os.path.join(CREDENTIAL_DIR, os.path.basename(d.file)))
         except OSError:
             pass
-    return stored_name
+    return doc
 
 
-def read_credential_document(profile: TherapistProfile):
-    """Return the decrypted document bytes, or None if there is no document."""
-    if not profile.document_file:
+def read_credential_document(doc):
+    """Decrypted bytes of one CredentialDocument, or None if the file is missing."""
+    if doc is None:
         return None
-    path = os.path.join(CREDENTIAL_DIR, os.path.basename(profile.document_file))
+    path = os.path.join(CREDENTIAL_DIR, os.path.basename(doc.file))
     if not os.path.isfile(path):
         return None
     with open(path, "rb") as f:
         return decrypt_bytes(f.read())
+
+
+def migrate_legacy_documents(db: DbSession):
+    """Accounts from before multiple documents had one file on the profile: move it to credential_documents."""
+    for profile in db.query(TherapistProfile).all():
+        if profile.document_file:
+            db.add(CredentialDocument(
+                profile_id=profile.id,
+                uploaded_by_id=profile.user_id,
+                kind=registration_kind(profile.profession),
+                file=profile.document_file,
+                name=profile.document_name,
+                content_type=profile.document_type,
+                uploaded_at=profile.submitted_at or datetime.utcnow(),
+            ))
+            profile.document_file = profile.document_name = profile.document_type = None
+    db.commit()
 
 
 # ---------------------------------------------------------------------------

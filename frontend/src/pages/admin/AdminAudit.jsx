@@ -27,6 +27,9 @@ export const ACTION_LABEL = {
   CONSENT_CAMERA_WITHDRAWN: "Camera withdrawn",
   SESSIONS_CLEARED: "Session history cleared",
   EMERGENCY_ALERT: "Emergency alert sent",
+  EXERCISE_ADDED: "Exercise added to library",
+  EXERCISE_REMOVED: "Exercise removed from library",
+  CREDENTIAL_UPLOADED_BY_ADMIN: "Certificate uploaded by admin",
 };
 
 export const ACTION_COLOR = {

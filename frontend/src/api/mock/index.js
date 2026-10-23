@@ -32,8 +32,8 @@ const db = {
     { id: 4, name: "Ravi Kumar", email: "patient@rehabrep.demo", password: "patient123", role: "PATIENT", status: "ACTIVE" },
   ],
   profiles: {
-    2: { status: "APPROVED", profession: "PHYSIOTHERAPIST", registration_number: "DEMO-PT-0001", issuing_body: "State Physiotherapy Council", workplace: "Demo Rehab Clinic", phone: "+91 90000 00001", decision_reason: "Demo account", submitted_at: daysAgo(10), reviewed_at: daysAgo(9), has_document: true, document_name: "demo_certificate.pdf", register_check_note: "Demo data" },
-    3: { status: "PENDING", profession: "PHYSIOTHERAPIST", registration_number: "DEMO-PT-0002", issuing_body: "Indian Association of Physiotherapists (IAP)", workplace: "Demo Physio Centre", phone: "+91 90000 00002", decision_reason: null, submitted_at: daysAgo(1), reviewed_at: null, has_document: true, document_name: "demo_certificate.pdf" },
+    2: { status: "APPROVED", profession: "PHYSIOTHERAPIST", registration_number: "DEMO-PT-0001", issuing_body: "State Physiotherapy Council", workplace: "Demo Rehab Clinic", phone: "+91 90000 00001", decision_reason: "Demo account", submitted_at: daysAgo(10), reviewed_at: daysAgo(9), documents: [{ id: 901, kind: "PHYSIO_REGISTRATION", label: "Physiotherapy council registration certificate", name: "demo_certificate.pdf", uploaded_at: daysAgo(10), uploaded_by_admin: false }], register_check_note: "Demo data" },
+    3: { status: "PENDING", profession: "PHYSIOTHERAPIST", registration_number: "DEMO-PT-0002", issuing_body: "Indian Association of Physiotherapists (IAP)", workplace: "Demo Physio Centre", phone: "+91 90000 00002", decision_reason: null, submitted_at: daysAgo(1), reviewed_at: null, documents: [{ id: 902, kind: "PHYSIO_REGISTRATION", label: "Physiotherapy council registration certificate", name: "demo_certificate.pdf", uploaded_at: daysAgo(1), uploaded_by_admin: false }] },
   },
   patients: [{ id: 1, user_id: 4, therapist_id: 2, surgery_type: "Knee replacement (left)", notes: null }],
   prescriptions: [{ id: 1, patient_id: 1, created_by: 2, version: 1, status: "ACTIVE", note: null, status_reason: null, previous_id: null, created_at: daysAgo(5), activated_at: daysAgo(5), ended_at: null }],
@@ -76,9 +76,19 @@ const need = (role) => {
 const log = (actor, action, type, target, reason) =>
   db.audit.unshift({ id: db.nextId++, created_at: now(), actor_id: actor, actor_name: user(actor)?.name || "System", actor_role: user(actor)?.role || null, action, target_type: type, target_id: target, target_name: type === "USER" ? user(target)?.name : null, reason });
 
+const DOC_LABELS = { NEET: "NEET exam certificate / scorecard", MEDICAL_REGISTRATION: "Medical practice registration certificate (NMC / State Medical Council)", PHYSIO_REGISTRATION: "Physiotherapy council registration certificate" };
+const REQUIRED_DOCS = { DOCTOR: ["NEET", "MEDICAL_REGISTRATION"], PHYSIOTHERAPIST: ["PHYSIO_REGISTRATION"] };
+const DOC_FIELDS = { neet_certificate: "NEET", medical_certificate: "MEDICAL_REGISTRATION", physio_certificate: "PHYSIO_REGISTRATION" };
+function addDoc(p, kind, name, byAdmin) {
+  p.documents = (p.documents || []).filter((d) => d.kind !== kind);
+  p.documents.push({ id: db.nextId++, kind, label: DOC_LABELS[kind], name, uploaded_at: now(), uploaded_by_admin: byAdmin });
+}
 function therapistOut(u) {
   const p = db.profiles[u.id];
-  return p ? { ...p } : null;
+  if (!p) return null;
+  const docs = p.documents || [];
+  const required = (REQUIRED_DOCS[p.profession] || []).map((k) => ({ kind: k, label: DOC_LABELS[k], provided: docs.some((d) => d.kind === k) }));
+  return { ...p, documents: docs, has_document: docs.length > 0, required_documents: required, missing_documents: required.filter((r) => !r.provided).map((r) => r.kind) };
 }
 const CONSENT_VERSION = "2026-10-v1";
 function consentOut(userId) {
@@ -176,8 +186,8 @@ export const mock = {
     if (String(formValue(form, "password")).length < 8) throw new MockError(400, "Password must be at least 8 characters");
     const id = db.nextId++;
     db.users.push({ id, name: formValue(form, "name"), email, password: formValue(form, "password"), role: "THERAPIST", status: "ACTIVE" });
-    const doc = form.get("document");
-    db.profiles[id] = { status: "PENDING", profession: formValue(form, "profession"), registration_number: formValue(form, "registration_number"), issuing_body: formValue(form, "issuing_body"), workplace: formValue(form, "workplace"), phone: formValue(form, "phone"), decision_reason: null, submitted_at: now(), reviewed_at: null, has_document: Boolean(doc), document_name: doc?.name || null };
+    db.profiles[id] = { status: "PENDING", profession: formValue(form, "profession"), registration_number: formValue(form, "registration_number"), issuing_body: formValue(form, "issuing_body"), workplace: formValue(form, "workplace"), phone: formValue(form, "phone"), decision_reason: null, submitted_at: now(), reviewed_at: null, documents: [] };
+    Object.entries(DOC_FIELDS).forEach(([field, kind]) => form.get(field) && addDoc(db.profiles[id], kind, form.get(field).name, false));
     log(id, "THERAPIST_REGISTERED", "USER", id, null);
     return { message: "Registration received (mock mode)." };
   },
@@ -190,8 +200,7 @@ export const mock = {
       const v = formValue(form, k);
       if (v) p[k] = v;
     });
-    const doc = form.get("document");
-    if (doc && doc.name) Object.assign(p, { has_document: true, document_name: doc.name });
+    Object.entries(DOC_FIELDS).forEach(([field, kind]) => form.get(field) && form.get(field).name && addDoc(p, kind, form.get(field).name, false));
     p.status = "PENDING";
     p.submitted_at = now();
     log(u.id, "THERAPIST_RESUBMITTED", "USER", u.id, null);
@@ -199,6 +208,25 @@ export const mock = {
   },
 
   exercises: async () => (await wait(), clone(EXERCISES)),
+  addExercise: async (data) => {
+    await wait();
+    const t = need("THERAPIST");
+    const b = exById[data.based_on];
+    if (!b || b.joint !== data.joint) throw new MockError(400, "Choose how the camera measures it from the same category");
+    if (EXERCISES.some((e) => e.name.toLowerCase() === data.name.trim().toLowerCase())) throw new MockError(409, "That name is already in the library");
+    const ex = { ...b, ...data, name: data.name.trim(), key: `custom_${db.nextId++}`, custom: true, created_by_id: t.id, created_by: t.name };
+    EXERCISES.push(ex);
+    exById[ex.key] = ex;
+    return clone(ex);
+  },
+  removeExercise: async (key) => {
+    await wait();
+    const i = EXERCISES.findIndex((e) => e.key === key && e.custom);
+    if (i < 0) throw new MockError(404, "Exercise not found");
+    EXERCISES.splice(i, 1);
+    delete exById[key];
+    return { removed: key };
+  },
   patients: async () => {
     await wait();
     const t = need("THERAPIST");
@@ -435,6 +463,17 @@ export const mock = {
     return db.users.filter((u) => u.role === "THERAPIST" && (!status || db.profiles[u.id]?.status === status)).sort((a, b) => order[db.profiles[a.id].status] - order[db.profiles[b.id].status]).map(therapistRow);
   },
   adminTherapist: async (id) => (await wait(), need("ADMIN"), therapistRow(user(Number(id)))),
+  adminUploadDocument: async (id, kind, file) => {
+    await wait();
+    const a = need("ADMIN");
+    addDoc(db.profiles[Number(id)], kind, file.name, true);
+    log(a.id, "CREDENTIAL_UPLOADED_BY_ADMIN", "USER", Number(id), DOC_LABELS[kind]);
+    return therapistRow(user(Number(id)));
+  },
+  adminDocument: async () => {
+    need("ADMIN");
+    return new Blob(["DEMO DOCUMENT (mock mode) - not a real certificate"], { type: "text/plain" });
+  },
   adminTherapistDocument: async () => {
     need("ADMIN");
     return new Blob(["DEMO DOCUMENT (mock mode) - not a real certificate"], { type: "text/plain" });
@@ -443,6 +482,8 @@ export const mock = {
     await wait();
     const a = need("ADMIN");
     const p = db.profiles[Number(id)];
+    const missing = therapistOut(user(Number(id))).missing_documents;
+    if (decision === "APPROVE" && missing.length) throw new MockError(400, `Cannot approve yet - missing: ${missing.map((k) => DOC_LABELS[k]).join("; ")}`);
     Object.assign(p, { status: decision === "APPROVE" ? "APPROVED" : "REJECTED", decision_reason: reason, register_check_note: note || null, reviewed_at: now(), reviewed_by: a.name });
     log(a.id, decision === "APPROVE" ? "THERAPIST_APPROVED" : "THERAPIST_REJECTED", "USER", Number(id), reason);
     return therapistRow(user(Number(id)));

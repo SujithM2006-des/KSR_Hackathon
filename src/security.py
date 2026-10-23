@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from clock import iso_utc
 from crypto import KEY_DIR
-from crud import latest_consent
+from crud import DOCUMENT_LABELS, latest_consent, required_documents
 from database import get_db
 from models import User
 
@@ -145,9 +145,31 @@ def therapist_status_out(profile) -> Optional[dict]:
         "decision_reason": profile.decision_reason,
         "reviewed_at": iso_utc(profile.reviewed_at),
         "submitted_at": iso_utc(profile.submitted_at),
-        "has_document": bool(profile.document_file),
-        "document_name": profile.document_name,
+        "has_document": bool(profile.documents),
+        "document_name": profile.documents[0].name if profile.documents else None,
+        "documents": [document_out(d) for d in profile.documents],
+        "required_documents": required_documents_out(profile),
+        "missing_documents": [r["kind"] for r in required_documents_out(profile) if not r["provided"]],
     }
+
+
+def document_out(doc) -> dict:
+    by = doc.uploaded_by
+    return {
+        "id": doc.id,
+        "kind": doc.kind,
+        "label": DOCUMENT_LABELS.get(doc.kind, doc.kind),
+        "name": doc.name,
+        "content_type": doc.content_type,
+        "uploaded_at": iso_utc(doc.uploaded_at),
+        "uploaded_by": by.name if by else None,
+        "uploaded_by_admin": bool(by and by.role == "ADMIN"),
+    }
+
+
+def required_documents_out(profile) -> list:
+    have = {d.kind for d in profile.documents}
+    return [{"kind": k, "label": DOCUMENT_LABELS[k], "provided": k in have} for k in required_documents(profile.profession)]
 
 
 def user_out(user: User, db: DbSession = None) -> dict:

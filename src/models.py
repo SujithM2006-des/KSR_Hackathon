@@ -13,6 +13,9 @@ exercise_plans     one prescribed exercise inside a prescription version (sets, 
 consent_records    each consent decision a patient makes (version of the text, camera yes/no, withdrawals)
 sessions           one row per exercise session: camera-tracked, patient-confirmed (guided) or skipped
 rep_logs           one row per rep inside a camera-tracked session
+custom_exercises   exercises a therapist added to the library; each is measured like a built-in one
+credential_documents  certificates a clinician (or an admin for them) uploaded for verification
+                   (doctor: NEET + medical registration; physiotherapist: council registration)
 
 Encryption (see crypto.py):
   EVERY data column is stored ENCRYPTED (names, emails, roles, surgery type,
@@ -79,12 +82,14 @@ class TherapistProfile(Base):
     register_check_note = Column(EncryptedText, nullable=True)  # admin's note on the public-register lookup
     reviewed_at = Column(EncryptedDateTime, nullable=True)
     submitted_at = Column(EncryptedDateTime, default=datetime.utcnow)
+    # legacy single document (moved to credential_documents at startup, see crud.migrate_legacy_documents)
     document_file = Column(EncryptedText, nullable=True)  # name of the ENCRYPTED file on disk
     document_name = Column(EncryptedText, nullable=True)  # original file name
     document_type = Column(EncryptedText, nullable=True)  # application/pdf | image/jpeg | image/png
 
     user = relationship("User", back_populates="therapist_profile", foreign_keys=[user_id])
     reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
+    documents = relationship("CredentialDocument", order_by="CredentialDocument.id")
 
 
 class AuditLog(Base):
@@ -178,6 +183,47 @@ class Prescription(Base):
     created_by = relationship("User", foreign_keys=[created_by_id])
     # ordered by id = the order the therapist added them (position is encrypted, so the DB can't sort it)
     items = relationship("ExercisePlan", back_populates="prescription", order_by="ExercisePlan.id")
+
+
+class CredentialDocument(Base):
+    """One certificate for clinician verification. The file is stored ENCRYPTED on disk under a random name."""
+
+    __tablename__ = "credential_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    profile_id = Column(Integer, ForeignKey("therapist_profiles.id"), nullable=False)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # the clinician, or an admin
+    # all encrypted
+    kind = Column(EncryptedText, nullable=False)  # NEET | MEDICAL_REGISTRATION | PHYSIO_REGISTRATION
+    file = Column(EncryptedText, nullable=False)  # name of the encrypted file on disk
+    name = Column(EncryptedText, nullable=True)  # original file name
+    content_type = Column(EncryptedText, nullable=True)
+    uploaded_at = Column(EncryptedDateTime, default=datetime.utcnow)
+
+    uploaded_by = relationship("User")
+
+
+class CustomExercise(Base):
+    """
+    An exercise a therapist added to the library. The camera measures it exactly like the built-in
+    exercise in `based_on` (same joint points and direction); the therapist sets the name, default
+    range and instructions. Plans refer to it as exercise_type "custom_<id>".
+    """
+
+    __tablename__ = "custom_exercises"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # all encrypted
+    name = Column(EncryptedText, nullable=False)
+    joint = Column(EncryptedText, nullable=False)  # Knee | Hip | Shoulder | Elbow
+    based_on = Column(EncryptedText, nullable=False)  # built-in exercise key used for tracking
+    default_min = Column(EncryptedFloat, nullable=False)
+    default_max = Column(EncryptedFloat, nullable=False)
+    instructions = Column(EncryptedText, nullable=False)
+    created_at = Column(EncryptedDateTime, default=datetime.utcnow)
+
+    created_by = relationship("User")
 
 
 class ExercisePlan(Base):

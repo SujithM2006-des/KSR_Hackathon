@@ -45,12 +45,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
 import admin_routes
+import exercise_routes
 import me_routes
 import patient_routes
 import therapist_routes
-from crud import get_active_plans, get_sessions, get_user_by_email, latest_consent, verify_password
-from database import PROJECT_ROOT, get_db, init_db
-from exercises import exercise_list
+from crud import get_active_plans, migrate_legacy_documents, get_sessions, get_user_by_email, latest_consent, verify_password
+from database import PROJECT_ROOT, SessionLocal, get_db, init_db
+from exercises import exercise_list, load_custom_exercises
 from models import Patient, Session, User
 from patient_routes import therapist_patient
 from security import current_user, make_token, require_patient, require_therapist, user_out
@@ -97,11 +98,18 @@ app.include_router(therapist_routes.router)
 app.include_router(admin_routes.router)
 app.include_router(patient_routes.router)
 app.include_router(me_routes.router)
+app.include_router(exercise_routes.router)
 
 
 @app.on_event("startup")
 def on_startup():
     init_db()
+    db = SessionLocal()
+    try:
+        migrate_legacy_documents(db)  # older single certificates -> credential_documents
+        load_custom_exercises(db)  # therapist-added exercises join the library
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------

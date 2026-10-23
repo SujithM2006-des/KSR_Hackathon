@@ -34,6 +34,8 @@ const live = {
 
   // exercises
   exercises: () => request("GET", "/exercises"),
+  addExercise: (data) => request("POST", "/exercises", { json: data }),
+  removeExercise: (key) => request("DELETE", `/exercises/${encodeURIComponent(key)}`),
 
   // therapist
   patients: () => request("GET", "/patients").then(mapList(mapPatient)),
@@ -78,6 +80,13 @@ const live = {
     ),
   adminTherapist: (id) => request("GET", `/admin/therapists/${id}`).then(mapTherapist),
   adminTherapistDocument: (id) => request("GET", `/admin/therapists/${id}/document`, { raw: true }),
+  adminDocument: (id, docId) => request("GET", `/admin/therapists/${id}/documents/${docId}`, { raw: true }),
+  adminUploadDocument: (id, kind, file) => {
+    const fd = new FormData();
+    fd.append("kind", kind);
+    fd.append("document", file);
+    return request("POST", `/admin/therapists/${id}/documents`, { form: fd }).then(mapTherapist);
+  },
   adminDecide: (id, decision, reason, registerCheckNote) =>
     request("POST", `/admin/therapists/${id}/decision`, {
       json: { decision, reason, register_check_note: registerCheckNote || null },

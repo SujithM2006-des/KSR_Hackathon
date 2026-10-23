@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api.js";
+import CertificateUploads, { FIELD, REQUIRED_DOCUMENTS } from "../components/CertificateUploads.jsx";
 import { Logo } from "../components/Icons.jsx";
 
 const EMPTY = {
@@ -21,7 +22,7 @@ export default function Register() {
   const navigate = useNavigate();
   const [cfg, setCfg] = useState(null);
   const [form, setForm] = useState(EMPTY);
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState({}); // { kind: File }
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -39,29 +40,20 @@ export default function Register() {
   const minPw = cfg ? cfg.min_password_length : 8;
   const maxMb = cfg ? cfg.max_document_mb : 5;
 
-  function pickFile(e) {
-    const f = e.target.files[0] || null;
-    setError("");
-    if (f && f.size > maxMb * 1024 * 1024) {
-      setError(`The document is larger than ${maxMb} MB.`);
-      e.target.value = "";
-      setFile(null);
-      return;
-    }
-    setFile(f);
-  }
+  const required = (cfg && cfg.required_documents && cfg.required_documents[form.profession]) || REQUIRED_DOCUMENTS[form.profession] || [];
 
   async function submit(e) {
     e.preventDefault();
     setError("");
     if (form.password !== form.confirm) return setError("Passwords do not match.");
     if (form.password.length < minPw) return setError(`Password must be at least ${minPw} characters.`);
-    if (!file) return setError("Please attach your registration certificate or licence.");
+    const missing = required.filter((r) => !files[r.kind]);
+    if (missing.length) return setError(`Please attach: ${missing.map((r) => r.label).join("; ")}.`);
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => {
       if (k !== "confirm") fd.append(k, v.trim ? v.trim() : v);
     });
-    fd.append("document", file);
+    required.forEach((r) => fd.append(FIELD[r.kind], files[r.kind]));
     setBusy(true);
     try {
       await api.registerTherapist(fd);
@@ -83,10 +75,10 @@ export default function Register() {
           <Link to="/login" className="back">
             ← Back to log in
           </Link>
-          <h1>Register as a therapist</h1>
+          <h1>Register as a clinician</h1>
           <p className="muted">
-            An admin checks your registration number with the issuing body before you can add
-            patients. Your document is stored encrypted and only admins can open it.
+            An admin checks your certificates and registration number before you can add patients. Doctors upload their
+            NEET certificate and medical practice registration; physiotherapists upload their council registration.
           </p>
         </div>
 
@@ -141,10 +133,18 @@ export default function Register() {
           Phone (optional)
           <input value={form.phone} onChange={set("phone")} />
         </label>
-        <label>
-          Certificate or licence ({cfg ? cfg.allowed_document_types.join(", ") : "PDF, JPG, PNG"}, max {maxMb} MB)
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={pickFile} />
-        </label>
+
+        <h3 className="span-2">Certificates for verification</h3>
+        <div className="span-2">
+          <CertificateUploads
+            key={form.profession}
+            required={required}
+            files={files}
+            maxMb={maxMb}
+            onError={setError}
+            onChange={(kind, f) => setFiles((old) => ({ ...old, [kind]: f }))}
+          />
+        </div>
 
         {error && <div className="alert alert-red span-2">{error}</div>}
         <div className="span-2 row-gap">

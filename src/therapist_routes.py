@@ -2,11 +2,14 @@
 ReHabRep - Therapist self-registration and own verification status.
 
   GET   /config/registration          professions + issuing bodies for the form (configurable)
-  POST  /auth/register-therapist      create account (status PENDING) + upload one credential document
-  GET   /therapist/verification       my verification status and the reason of the last decision
-  POST  /therapist/verification       resubmit details / a new document (after rejection, or while pending)
+  POST  /auth/register-therapist      create account (status PENDING) + upload the required certificates
+  GET   /therapist/verification       my verification status, documents and the reason of the last decision
+  POST  /therapist/verification       resubmit details / upload or replace certificates (while not approved)
 
-Credential documents
+Credential documents (an admin approves only when every required one is on file)
+  - DOCTOR:           neet_certificate (NEET scorecard) + medical_certificate (NMC / State Medical Council)
+  - PHYSIOTHERAPIST:  physio_certificate (physiotherapy council registration)
+  - "document" (older single upload) counts as the practice-registration certificate
   - PDF, JPG or PNG only, at most 5 MB, checked by content (not just the file name)
   - stored ENCRYPTED on disk under a random name; only admins can download them
 """
@@ -18,7 +21,16 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session as DbSession
 
-from crud import create_therapist, get_user_by_email, log_action, save_credential_document
+from crud import (
+    DOCUMENT_LABELS,
+    create_therapist,
+    get_user_by_email,
+    log_action,
+    missing_documents,
+    registration_kind,
+    required_documents,
+    save_credential_document,
+)
 from database import get_db
 from models import User
 from security import require_therapist_any, therapist_status_out
@@ -68,6 +80,18 @@ async def read_document(document: UploadFile):
     return data, content_type
 
 
+def uploads_by_kind(profession, neet=None, medical=None, physio=None, legacy=None):
+    """Map the uploaded files to document kinds (empty file fields are ignored)."""
+    files = {"NEET": neet, "MEDICAL_REGISTRATION": medical, "PHYSIO_REGISTRATION": physio}
+    if legacy is not None and legacy.filename and not (files[registration_kind(profession)] or None):
+        files[registration_kind(profession)] = legacy
+    return {k: f for k, f in files.items() if f is not None and f.filename}
+
+
+def labels(kinds):
+    return "; ".join(DOCUMENT_LABELS[k] for k in kinds)
+
+
 def clean(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -81,6 +105,7 @@ def registration_config():
         "professions": PROFESSIONS,
         "issuing_bodies": issuing_bodies(),
         "max_document_mb": MAX_DOC_BYTES // (1024 * 1024),
+        "required_documents": {p: [{"kind": k, "label": DOCUMENT_LABELS[k]} for k in required_documents(p)] for p in PROFESSIONS},
         "allowed_document_types": ["PDF", "JPG", "PNG"],
         "min_password_length": MIN_PASSWORD,
     }
@@ -96,7 +121,10 @@ async def register_therapist(
     issuing_body: str = Form(...),
     workplace: Optional[str] = Form(None),
     phone: Optional[str] = Form(None),
-    document: UploadFile = File(...),
+    neet_certificate: Optional[UploadFile] = File(None),
+    medical_certificate: Optional[UploadFile] = File(None),
+    physio_certificate: Optional[UploadFile] = File(None),
+    document: Optional[UploadFile] = File(None),
     db: DbSession = Depends(get_db),
 ):
     name, email = clean(name), clean(email)
@@ -116,7 +144,11 @@ async def register_therapist(
     if get_user_by_email(db, email):
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
 
-    data, content_type = await read_document(document)
+    files = uploads_by_kind(profession, neet_certificate, medical_certificate, physio_certificate, document)
+    missing = [k for k in required_documents(profession) if k not in files]
+    if missing:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Please upload: {labels(missing)}")
+    checked = {k: await read_document(f) for k, f in files.items()}  # validate every file before saving anything
 
     user = create_therapist(
         db,
@@ -130,7 +162,8 @@ async def register_therapist(
         phone=clean(phone),
         status="PENDING",
     )
-    save_credential_document(db, user.therapist_profile, document.filename, content_type, data)
+    for kind, (data, content_type) in checked.items():
+        save_credential_document(db, user.therapist_profile, kind, files[kind].filename, content_type, data, user.id)
     log_action(db, user.id, "THERAPIST_REGISTERED", "USER", user.id, None)
     return {"message": "Registration received. You can log in; patient features unlock after an admin approves you."}
 
@@ -146,6 +179,9 @@ async def resubmit_verification(
     issuing_body: Optional[str] = Form(None),
     workplace: Optional[str] = Form(None),
     phone: Optional[str] = Form(None),
+    neet_certificate: Optional[UploadFile] = File(None),
+    medical_certificate: Optional[UploadFile] = File(None),
+    physio_certificate: Optional[UploadFile] = File(None),
     document: Optional[UploadFile] = File(None),
     user: User = Depends(require_therapist_any),
     db: DbSession = Depends(get_db),
@@ -165,11 +201,14 @@ async def resubmit_verification(
     if phone is not None:
         profile.phone = clean(phone)
 
-    if document is not None and document.filename:
-        data, content_type = await read_document(document)
-        save_credential_document(db, profile, document.filename, content_type, data)
-    elif profile.status == "REJECTED" and not profile.document_file:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Please upload a credential document")
+    files = uploads_by_kind(profile.profession, neet_certificate, medical_certificate, physio_certificate, document)
+    checked = {k: await read_document(f) for k, f in files.items()}
+    for kind, (data, content_type) in checked.items():
+        save_credential_document(db, profile, kind, files[kind].filename, content_type, data, user.id)
+    missing = missing_documents(db, profile)
+    if missing:
+        db.refresh(user)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Please also upload: {labels(missing)}")
 
     # The previous decision reason stays visible until the admin decides again
     profile.status = "PENDING"

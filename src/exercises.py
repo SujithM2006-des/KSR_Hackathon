@@ -213,6 +213,46 @@ EXERCISES = {
 # Old names still accepted (plans saved before the exercise library existed)
 ALIASES = {"knee": "mini_squat"}
 
+BUILT_IN = frozenset(EXERCISES)  # the exercises defined above (therapist-added ones are added at runtime)
+JOINTS = ("Knee", "Hip", "Shoulder", "Elbow")
+CUSTOM_PREFIX = "custom_"
+
+
+def register_custom(row):
+    """
+    Add (or refresh) a therapist-added exercise. It copies the tracking settings of its built-in
+    `based_on` exercise and uses the therapist's name, default range and instructions.
+    `row` is a CustomExercise. Returns the exercise key ("custom_<id>").
+    """
+    base = EXERCISES[row.based_on]
+    key = f"{CUSTOM_PREFIX}{row.id}"
+    EXERCISES[key] = {
+        **base,
+        "name": row.name,
+        "default_min": row.default_min,
+        "default_max": row.default_max,
+        "instructions": row.instructions,
+        "custom": True,
+        "based_on": row.based_on,
+        "created_by_id": row.created_by_id,
+        "created_by": row.created_by.name if row.created_by else None,
+    }
+    return key
+
+
+def unregister_custom(key):
+    if key.startswith(CUSTOM_PREFIX):
+        EXERCISES.pop(key, None)
+
+
+def load_custom_exercises(db):
+    """Register every therapist-added exercise from the database (API startup, session runner)."""
+    from models import CustomExercise
+
+    for row in db.query(CustomExercise).all():
+        if row.based_on in BUILT_IN:
+            register_custom(row)
+
 
 def resolve_exercise(key):
     """Return the real exercise key, or None if unknown."""
@@ -243,6 +283,10 @@ def exercise_list():
                 "default_min": ex["default_min"],
                 "default_max": ex["default_max"],
                 "instructions": ex["instructions"],
+                "custom": bool(ex.get("custom")),
+                "based_on": ex.get("based_on"),
+                "created_by_id": ex.get("created_by_id"),
+                "created_by": ex.get("created_by"),
             }
         )
     return out

@@ -26,6 +26,8 @@ from crud import (
     get_active_plans,
     get_user_by_email,
     log_action,
+    migrate_legacy_documents,
+    registration_kind,
     save_credential_document,
 )
 from database import DATABASE_URL, SessionLocal, init_db
@@ -107,7 +109,8 @@ def ensure_therapist(db, data, status, admin=None):
         status=status,
     )
     save_credential_document(
-        db, user.therapist_profile, "demo_registration_certificate.pdf", "application/pdf", demo_pdf(data["name"])
+        db, user.therapist_profile, registration_kind(data["profession"]), "demo_registration_certificate.pdf",
+        "application/pdf", demo_pdf(data["name"]), user.id,
     )
     if status == "APPROVED" and admin is not None:
         profile = user.therapist_profile
@@ -125,6 +128,7 @@ def main():
     init_db()
     db = SessionLocal()
     try:
+        migrate_legacy_documents(db)
         admin = get_user_by_email(db, ADMIN["email"])
         if admin is None:
             admin = create_user(db, ADMIN["name"], ADMIN["email"], ADMIN["password"], "ADMIN")

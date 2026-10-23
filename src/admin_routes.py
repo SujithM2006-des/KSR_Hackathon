@@ -4,8 +4,10 @@ ReHabRep - Admin API (all routes require role ADMIN).
   GET   /admin/overview                         counts for the admin dashboard
   GET   /admin/therapists?status=PENDING        therapists (verification queue / list)
   GET   /admin/therapists/{user_id}             one therapist + professional details
-  GET   /admin/therapists/{user_id}/document    the credential document (decrypted, admins only)
-  POST  /admin/therapists/{user_id}/decision    APPROVE or REJECT, with a required reason
+  GET   /admin/therapists/{user_id}/document    first credential document (older clients)
+  GET   /admin/therapists/{user_id}/documents/{doc_id}   one certificate (decrypted, admins only)
+  POST  /admin/therapists/{user_id}/documents   upload a certificate for the clinician (e.g. received by email)
+  POST  /admin/therapists/{user_id}/decision    APPROVE (only with every required certificate) or REJECT, with a reason
   GET   /admin/patients                         patients grouped under their therapist
   POST  /admin/patients/{patient_id}/clear-sessions   delete a patient's session history (e.g. fresh demo)
   POST  /admin/users/{user_id}/suspend          suspend an account (reason required)
@@ -20,16 +22,28 @@ Every decision, suspension and reactivation is written to the audit log with its
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
 from clock import iso_utc
-from crud import create_user, get_user_by_email, list_audit, log_action, read_credential_document
+from crud import (
+    DOCUMENT_LABELS,
+    create_user,
+    credential_documents,
+    get_user_by_email,
+    list_audit,
+    log_action,
+    missing_documents,
+    read_credential_document,
+    required_documents,
+    save_credential_document,
+)
 from database import get_db
 from models import Patient, Session, TherapistProfile, User
 from security import require_admin, therapist_status_out
 from serializers import HIGH_PAIN, patient_summary
+from therapist_routes import read_document
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -128,23 +142,58 @@ def therapist_detail(user_id: int, admin: User = Depends(require_admin), db: DbS
     return therapist_row(db, _therapist(db, user_id))
 
 
-@router.get("/therapists/{user_id}/document")
-def therapist_document(user_id: int, admin: User = Depends(require_admin), db: DbSession = Depends(get_db)):
-    user = _therapist(db, user_id)
-    profile = user.therapist_profile
+def _send_document(db, admin, user, doc):
     try:
-        data = read_credential_document(profile)
+        data = read_credential_document(doc)
     except Exception:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Document could not be decrypted")
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No document uploaded")
-    log_action(db, admin.id, "CREDENTIAL_VIEWED", "USER", user.id, None)
-    safe_name = (profile.document_name or "document").replace('"', "")
+    log_action(db, admin.id, "CREDENTIAL_VIEWED", "USER", user.id, DOCUMENT_LABELS.get(doc.kind, doc.kind))
+    safe_name = (doc.name or "document").replace('"', "")
     return Response(
         content=data,
-        media_type=profile.document_type or "application/octet-stream",
+        media_type=doc.content_type or "application/octet-stream",
         headers={"Content-Disposition": f'inline; filename="{safe_name}"', "Cache-Control": "no-store"},
     )
+
+
+@router.get("/therapists/{user_id}/document")
+def therapist_document(user_id: int, admin: User = Depends(require_admin), db: DbSession = Depends(get_db)):
+    user = _therapist(db, user_id)
+    docs = credential_documents(db, user.therapist_profile)
+    if not docs:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No document uploaded")
+    return _send_document(db, admin, user, docs[0])
+
+
+@router.get("/therapists/{user_id}/documents/{doc_id}")
+def therapist_document_by_id(user_id: int, doc_id: int, admin: User = Depends(require_admin), db: DbSession = Depends(get_db)):
+    user = _therapist(db, user_id)
+    doc = next((d for d in credential_documents(db, user.therapist_profile) if d.id == doc_id), None)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+    return _send_document(db, admin, user, doc)
+
+
+@router.post("/therapists/{user_id}/documents", status_code=201)
+async def upload_document_for_therapist(
+    user_id: int,
+    kind: str = Form(...),
+    document: UploadFile = File(...),
+    admin: User = Depends(require_admin),
+    db: DbSession = Depends(get_db),
+):
+    """An admin adds a certificate the clinician sent another way (email, in person). Recorded in the audit log."""
+    user = _therapist(db, user_id)
+    profile = user.therapist_profile
+    if kind not in required_documents(profile.profession):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This document type is not required for this profession")
+    data, content_type = await read_document(document)
+    save_credential_document(db, profile, kind, document.filename, content_type, data, admin.id)
+    log_action(db, admin.id, "CREDENTIAL_UPLOADED_BY_ADMIN", "USER", user.id, DOCUMENT_LABELS[kind])
+    db.refresh(user)
+    return therapist_row(db, user)
 
 
 @router.post("/therapists/{user_id}/decision")
@@ -154,6 +203,12 @@ def decide(user_id: int, body: DecisionIn, admin: User = Depends(require_admin),
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Decision must be APPROVE or REJECT")
     user = _therapist(db, user_id)
     profile: TherapistProfile = user.therapist_profile
+    missing = missing_documents(db, profile)
+    if decision == "APPROVE" and missing:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Cannot approve yet - missing: " + "; ".join(DOCUMENT_LABELS[k] for k in missing),
+        )
     profile.status = "APPROVED" if decision == "APPROVE" else "REJECTED"
     profile.decision_reason = body.reason.strip()
     profile.register_check_note = (body.register_check_note or "").strip() or None

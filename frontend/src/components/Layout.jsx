@@ -5,6 +5,10 @@ import { Avatar, Icon, Logo } from "./Icons.jsx";
 
 const ROLE_LABEL = { ADMIN: "Administrator", THERAPIST: config.clinicianLabel, PATIENT: "Patient" };
 
+const PROFESSION_LABEL = { DOCTOR: "Doctor", PHYSIOTHERAPIST: "Physiotherapist" };
+const roleLabel = (u) =>
+  (u.role === "THERAPIST" && u.therapist && PROFESSION_LABEL[u.therapist.profession]) || ROLE_LABEL[u.role] || u.role;
+
 // [path, label, icon, exact match]
 const NAV = {
   ADMIN: [
@@ -109,7 +113,7 @@ export default function Layout({ user, children }) {
             <Avatar name={user.name} />
             <span className="appbar-who">
               <b>{user.name}</b>
-              <span>{ROLE_LABEL[user.role] || user.role}</span>
+              <span>{roleLabel(user)}</span>
             </span>
             <button className="icon-btn" onClick={handleLogout} title="Log out" aria-label="Log out">
               <Icon name="logout" />

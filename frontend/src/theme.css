@@ -1594,3 +1594,116 @@ a.list-row:hover .list-title {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- exercise library: add exercise ---------- */
+.lib-card {
+  position: relative;
+}
+.lib-remove {
+  align-self: flex-start;
+  color: var(--red);
+}
+.add-ex-modal {
+  max-width: 860px;
+  width: min(860px, 94vw);
+}
+.add-ex-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 22px;
+  align-items: start;
+  margin: 8px 0 14px;
+}
+.add-ex-grid .lib-card {
+  margin-top: 6px;
+}
+@media (max-width: 760px) {
+  .add-ex-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.add-ex-modal {
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+/* ---------- clinician certificates ---------- */
+.cert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cert-item {
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fafaff;
+  gap: 6px;
+}
+.cert-item.done {
+  border-style: solid;
+  border-color: #bbf7d0;
+  background: var(--green-soft);
+}
+.cert-title {
+  color: var(--text);
+  font-weight: 600;
+}
+.cert-req {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--red);
+  text-transform: uppercase;
+  margin-left: 6px;
+}
+.cert-have {
+  font-size: 12.5px;
+  color: var(--green);
+}
+.cert-status {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cert-status li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+.cert-status li > span {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  flex: none;
+  color: #fff;
+}
+.cert-status li.ok > span {
+  background: var(--green);
+}
+.cert-status li.missing {
+  border-color: #fcd34d;
+  background: var(--amber-soft);
+}
+.cert-status li.missing > span {
+  background: #f59e0b;
+}
+.file-btn {
+  position: relative;
+  flex-direction: row;
+  cursor: pointer;
+}
+.file-btn input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}

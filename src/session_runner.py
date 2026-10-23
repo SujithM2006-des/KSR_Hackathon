@@ -29,7 +29,7 @@ from urllib.parse import parse_qs, urlparse
 import cv2
 from ultralytics import YOLO
 
-from exercises import ALIASES, EXERCISES, get_exercise, measure, resolve_exercise
+from exercises import ALIASES, EXERCISES, get_exercise, load_custom_exercises, measure, resolve_exercise
 from pose_angle_test import (
     MODEL_PATH,
     PROCESS_MAX_SIDE,
@@ -178,6 +178,7 @@ def load_plan_from_db(args):
     init_db()
     db = SessionLocal()
     try:
+        load_custom_exercises(db)  # the plan may use a therapist-added exercise
         plan = get_plan(db, args.plan_id)
         if plan is None:
             return None
