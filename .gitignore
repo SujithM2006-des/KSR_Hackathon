@@ -1,0 +1,42 @@
+# ===== NEVER COMMIT: keys and secrets =====
+secrets/
+*.key
+*.secret
+.env
+.env.*
+frontend/.env
+frontend/.env.*
+
+# ===== Patient / clinical data (encrypted or not, keep it off GitHub) =====
+data/
+output/
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+
+# ===== Large or downloadable files =====
+videos/
+*.mp4
+*.avi
+*.mov
+*.pt
+*.onnx
+
+# ===== Python =====
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ===== Node / frontend =====
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# ===== Editors / OS =====
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

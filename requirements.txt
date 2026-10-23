@@ -1,0 +1,13 @@
+ultralytics
+opencv-python
+numpy
+pyttsx3
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+cryptography
+python-multipart
+yt-dlp
+pytest
+httpx
