@@ -5,6 +5,11 @@ Camera / video -> YOLO11 Pose -> joint angle (any exercise in exercises.py)
 -> rep counter -> range judge
 -> live on-screen + spoken cues -> session report for the therapist.
 
+Display:
+  default        an OpenCV window on this computer (Q = quit, space = pause)
+  --stream-port  no window: the web page shows the video (MJPEG) and live numbers instead;
+                 --stream-token must be sent with every request (?t=...)
+
 Plan source:
   --plan-id N   load the therapist's plan from the database and SAVE the
                 session + every rep back to the database (normal use)
@@ -15,8 +20,11 @@ Plan source:
 import argparse
 import json
 import os
+import threading
 import time
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 import cv2
 from ultralytics import YOLO
@@ -40,6 +48,8 @@ WINDOW_NAME = "ReHabRep - Session"
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 CUE_SECONDS = 1.5  # how long a cue stays on screen
 GAUGE_MAX = 180  # top of the angle gauge (degrees)
+STREAM_MAX_WIDTH = 960  # frames sent to the web page are scaled down to this width
+FINISH_AFTER_DONE_S = 2.5  # web mode: end this long after the last prescribed rep
 
 # Colours (BGR)
 WHITE = (255, 255, 255)
@@ -76,7 +86,88 @@ def parse_args():
     p.add_argument("--plan-id", type=int, default=None, help="Load plan from DB and save the session to DB")
     p.add_argument("--pain", type=int, default=None, help="Pain score 0-10 (asked at the end if not given)")
     p.add_argument("--model", default=MODEL_PATH, help="Pose model, e.g. yolo11s-pose.pt for higher accuracy")
+    p.add_argument("--stream-port", type=int, default=None, help="Show the session in the web page instead of a window")
+    p.add_argument("--stream-token", default="", help="Secret the web page must send to watch / stop the session")
+    p.add_argument("--stream-host", default="127.0.0.1", help="Address the stream listens on")
     return p.parse_args()
+
+
+class LiveStream:
+    """Serves the annotated frames (MJPEG) and the live numbers to the web page instead of a desktop window."""
+
+    def __init__(self, host, port, token):
+        self.token = token
+        self.lock = threading.Lock()
+        self.jpeg = None
+        self.status = {"phase": "loading"}
+        self.stop = threading.Event()
+        self.closed = threading.Event()
+        live = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def _start(self, content_type):
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+
+            def do_GET(self):
+                url = urlparse(self.path)
+                if parse_qs(url.query).get("t", [""])[0] != live.token:
+                    self.send_error(403)
+                    return
+                if url.path == "/status":
+                    with live.lock:
+                        body = json.dumps(live.status).encode()
+                    self._start("application/json")
+                    self.wfile.write(body)
+                elif url.path == "/stop":
+                    live.stop.set()
+                    self._start("application/json")
+                    self.wfile.write(b'{"stopping": true}')
+                elif url.path == "/stream":
+                    self._start("multipart/x-mixed-replace; boundary=frame")
+                    last = None
+                    try:
+                        while not live.closed.is_set():
+                            with live.lock:
+                                jpg = live.jpeg
+                            if jpg is not None and jpg is not last:
+                                head = b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpg)
+                                self.wfile.write(head + jpg + b"\r\n")
+                                last = jpg
+                            time.sleep(0.03)
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                        pass
+                else:
+                    self.send_error(404)
+
+        self.server = ThreadingHTTPServer((host, port), Handler)
+        self.server.daemon_threads = True
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def frame(self, image):
+        h, w = image.shape[:2]
+        if w > STREAM_MAX_WIDTH:
+            image = cv2.resize(image, (STREAM_MAX_WIDTH, int(h * STREAM_MAX_WIDTH / w)), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        if ok:
+            with self.lock:
+                self.jpeg = buf.tobytes()
+
+    def update(self, **values):
+        with self.lock:
+            self.status.update(values)
+
+    def close(self, linger_s=1.5):
+        time.sleep(linger_s)  # let the page read the final status
+        self.closed.set()
+        self.server.shutdown()
+        self.server.server_close()
 
 
 def load_plan_from_db(args):
@@ -275,7 +366,15 @@ def print_report(report):
 # ---------------------------------------------------------------------------
 def main():
     args = parse_args()
+    live = LiveStream(args.stream_host, args.stream_port, args.stream_token) if args.stream_port else None
+    try:
+        run(args, live)
+    finally:
+        if live:
+            live.close()
 
+
+def run(args, live):
     if args.plan_id is not None:
         plan = load_plan_from_db(args)
         if plan is None:
@@ -305,6 +404,9 @@ def main():
     cap, is_video = open_source(args.source)
     if cap is None or not cap.isOpened():
         print("Could not open the source.")
+        if live:
+            live.update(phase="error", message="Could not open the camera. Close other apps using it and try again.")
+            time.sleep(3)
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -333,7 +435,11 @@ def main():
     view_text = "side-on" if ex["view"] == "side" else "facing the camera"
     cue_text, cue_color, cue_until = f"Get ready - {view_text}", CYAN, time.perf_counter() + 3.0
     session_done = False
+    done_at = None
     voice.say("Get ready. " + ex["instructions"])
+    if live:
+        live.update(phase="running", exercise=ex["name"], sets=args.sets, reps=args.reps, prescribed=prescribed,
+                    min=args.min, max=args.max, joint=ex["joint"])
 
     def show_cue(text, color, spoken=None):
         """Show a cue on screen and speak it (spoken text can be shorter)."""
@@ -345,6 +451,11 @@ def main():
 
     try:
         while True:
+            if live and live.stop.is_set():
+                print("Stopped from the web page.")
+                break
+            if live and done_at and time.perf_counter() - done_at > FINISH_AFTER_DONE_S:
+                break
             if not paused:
                 ok, frame = cap.read()
                 if not ok and is_video and frame_no > 0 and not session_done:
@@ -400,8 +511,9 @@ def main():
                         done = len(counter.reps)
                         if done >= prescribed and not session_done:
                             session_done = True
+                            done_at = time.perf_counter()
                             show_cue(
-                                "Session complete! Press Q to finish",
+                                "Session complete!" if live else "Session complete! Press Q to finish",
                                 CYAN,
                                 "Session complete. Well done.",
                             )
@@ -446,6 +558,15 @@ def main():
                         writer = cv2.VideoWriter(args.save, fourcc, fps, (frame_w, frame_h))
                     writer.write(annotated)
 
+                if live:
+                    live.frame(annotated)
+                    live.update(
+                        set_no=set_no, rep_in_set=rep_in_set, done=done, good=good, under=under, over=over,
+                        angle=None if angle_now is None else round(angle_now), side=side, zone=zone,
+                        cue=cue_text if time.perf_counter() < cue_until else None, complete=session_done,
+                    )
+                    continue  # web mode: no desktop window
+
                 if display_size is None:
                     display_size = fit_to_screen(frame_w, frame_h, screen_w, screen_h)
                     setup_window(display_size[0], display_size[1], screen_w, screen_h)
@@ -475,6 +596,8 @@ def main():
             pain_score = ask_pain_score()
 
         session_id = None
+        if live:
+            live.update(phase="saving")
         if args.plan_id is not None:
             try:
                 session_id = save_to_db(args.plan_id, counter, prescribed, args.source, pain_score)
@@ -494,6 +617,8 @@ def main():
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
         print(f"Session report saved to: {report_path}")
+        if live:
+            live.update(phase="finished", session_id=session_id, reps_saved=len(counter.reps))
 
 
 if __name__ == "__main__":

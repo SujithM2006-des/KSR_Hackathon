@@ -1495,3 +1495,102 @@ a.list-row:hover .list-title {
   color: var(--green);
   font-weight: 600;
 }
+
+/* ---------- exercise session: live video on the page ---------- */
+.session-page {
+  max-width: 1180px;
+}
+.start-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.start-actions .btn {
+  flex: 1 1 240px;
+}
+.live-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+.live-video {
+  background: #0f1838;
+  border-radius: 14px;
+  overflow: hidden;
+  min-height: 360px;
+  display: grid;
+  place-items: center;
+}
+.live-video img {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+.live-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+  padding: 30px;
+  text-align: center;
+}
+.live-wait .muted {
+  color: #b7bfdc;
+}
+.live-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.live-side h3 {
+  margin: 0;
+}
+.live-cue {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 700;
+}
+.live-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.live-stats > div {
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+}
+.live-stats .wide {
+  grid-column: span 2;
+}
+.live-stats span,
+.live-stats small {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.live-stats b {
+  font-size: 26px;
+  font-weight: 800;
+}
+.live-results {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.live-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+@media (max-width: 1000px) {
+  .live-panel {
+    grid-template-columns: 1fr;
+  }
+}

@@ -33,6 +33,7 @@ PATIENT
 """
 
 import os
+import secrets
 import subprocess
 import sys
 from datetime import datetime
@@ -61,6 +62,10 @@ SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 # In video mode the patient can still pick the live webcam per session (StartIn.use_camera).
 INPUT_MODE = os.getenv("REHABREP_INPUT", "video").strip().lower()
 CAMERA_INDEX = os.getenv("REHABREP_CAMERA_INDEX", "0")
+# The running session shows its video in the web page (session_runner --stream-port).
+STREAM_PORT = int(os.getenv("REHABREP_STREAM_PORT", "8765"))
+STREAM_HOST = os.getenv("REHABREP_STREAM_HOST", "127.0.0.1")  # 0.0.0.0 to watch from a phone on the hotspot
+_runner = {"proc": None}  # the one session running on this computer
 TEST_VIDEOS = {  # exercise key -> recorded test video in videos/
     "mini_squat": "squat_test.mp4",
     "seated_knee_extension": "knee_ext_1.mp4",
@@ -251,32 +256,52 @@ def my_session_input(plan_id: int, user: User = Depends(require_patient), db: Db
 
 @app.post("/my/sessions/start")
 def start_session(body: StartIn, user: User = Depends(require_patient), db: DbSession = Depends(get_db)):
-    """Opens the ReHabRep exercise window on this computer for the chosen plan."""
+    """Starts tracking for the chosen plan; the web page shows the live video from the stream."""
     plan = _my_active_plan(body.plan_id, user, db)
     consent = latest_consent(db, user.id)
     if consent is None or not consent.camera_allowed:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Camera use is not allowed in your consent settings. Use 'Do it without camera' or allow the camera in Settings.",
+            "Camera use is not allowed in your consent settings. Allow the camera in Settings to exercise.",
         )
 
     info = session_input(plan, use_camera=body.use_camera)
     if not info["available"]:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "There is no test video for this exercise yet. Use 'Do it without camera' for now.",
+            "There is no test video for this exercise yet. Start with your camera instead.",
         )
     source = info["source"]
 
+    # only one session at a time: a new Start ends the previous one (it frees the camera and the port)
+    old = _runner["proc"]
+    if old is not None and old.poll() is None:
+        old.terminate()
+        try:
+            old.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            old.kill()
+
+    token = secrets.token_urlsafe(16)
     cmd = [
         sys.executable,
         os.path.join(SRC_DIR, "session_runner.py"),
         "--plan-id", str(body.plan_id),
         "--source", source,
+        "--stream-port", str(STREAM_PORT),
+        "--stream-host", STREAM_HOST,
+        "--stream-token", token,
     ]
     # stdin=DEVNULL: no terminal pain question - the web page asks instead
     proc = subprocess.Popen(cmd, cwd=PROJECT_ROOT, stdin=subprocess.DEVNULL)
-    return {"started": True, "pid": proc.pid, "mode": info["mode"], "started_at": datetime.now().isoformat()}
+    _runner["proc"] = proc
+    return {
+        "started": True,
+        "pid": proc.pid,
+        "mode": info["mode"],
+        "started_at": datetime.now().isoformat(),
+        "stream": {"port": STREAM_PORT, "token": token},
+    }
 
 
 @app.patch("/sessions/{session_id}/pain")

@@ -3,20 +3,124 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, getUser, newRequestId } from "../api.js";
 import { FollowedBadge, ModeBadge, SessionStatusBadge } from "../components/Badge.jsx";
 import SafetyNote from "../components/SafetyNote.jsx";
+import { Icon } from "../components/Icons.jsx";
 
 // One exercise, start to finish:
 //   check   -> "Do you feel okay to exercise today?"
-//   choose  -> with the camera (opens the ReHabRep window) or without (guided, patient-confirmed)
-//   tracked -> waiting for the camera window to finish
-//   guided  -> set-by-set: Set done, rest countdown, Pause, Stop, I feel pain
-//   painstop-> stop guidance after "I feel pain"
+//   choose  -> start with the live camera or the recorded test video
+//   tracked -> the session runs on this computer; its video and live numbers are shown on this page
 //   after   -> pain score + note
 //   done    -> summary
-const POLL_MS = 3000;
+const POLL_MS = 2000; // looking for the saved session
+const STATUS_MS = 500; // live numbers from the running session
+const ZONE_CLASS = { GOOD: "ok", UNDER: "warn", OVER: "bad" };
 
-function fmtTime(s) {
-  const m = Math.floor(s / 60);
-  return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+// Live video + numbers from the session runner (session_runner.py --stream-port)
+function LiveSession({ stream, item, onStop }) {
+  const base = `${window.location.protocol}//${window.location.hostname}:${stream.port}`;
+  const q = `t=${encodeURIComponent(stream.token)}`;
+  const [st, setSt] = useState({ phase: "loading" });
+  const [stopping, setStopping] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(`${base}/status?${q}`, { cache: "no-store" });
+        if (r.ok && alive) setSt(await r.json());
+      } catch {
+        /* not started yet, or already finished */
+      }
+    };
+    tick();
+    const t = setInterval(tick, STATUS_MS);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [base, q]);
+
+  async function stop(pain) {
+    setStopping(true);
+    try {
+      await fetch(`${base}/stop?${q}`, { cache: "no-store" });
+    } catch {
+      /* already stopped */
+    }
+    onStop(pain);
+  }
+
+  const running = st.phase === "running";
+  return (
+    <section className="panel live-panel">
+      <div className="live-video">
+        {st.phase === "error" ? (
+          <div className="live-wait">
+            <Icon name="alert" size={30} />
+            <b>{st.message || "The camera could not start."}</b>
+          </div>
+        ) : running || st.phase === "saving" || st.phase === "finished" ? (
+          <img src={`${base}/stream?${q}`} alt="Live exercise tracking" />
+        ) : (
+          <div className="live-wait">
+            <span className="spinner" />
+            <b>Starting the camera and the pose model...</b>
+            <span className="muted small">This takes a few seconds the first time.</span>
+          </div>
+        )}
+      </div>
+
+      <aside className="live-side">
+        <h3>Live session</h3>
+        {st.phase === "saving" || st.phase === "finished" ? (
+          <div className="alert alert-green small">Session finished - saving your result...</div>
+        ) : st.cue ? (
+          <div className="live-cue">{st.cue}</div>
+        ) : (
+          <p className="muted small" style={{ margin: 0 }}>
+            Stand {item.view === "side" ? "side-on to" : "facing"} the camera with your {item.joint ? item.joint.toLowerCase() : "body"} in view.
+          </p>
+        )}
+        <div className="live-stats">
+          <div>
+            <span>Set</span>
+            <b>
+              {st.set_no || 1}/{st.sets || item.sets}
+            </b>
+          </div>
+          <div>
+            <span>Rep</span>
+            <b>
+              {st.rep_in_set || 0}/{st.reps || item.reps_per_set}
+            </b>
+          </div>
+          <div className="wide">
+            <span>Angle now</span>
+            <b className={ZONE_CLASS[st.zone] || ""}>{st.angle != null ? `${st.angle}°` : "-"}</b>
+            <small>
+              target {item.min_angle}° – {item.max_angle}°
+            </small>
+          </div>
+        </div>
+        <div className="live-results">
+          <span className="badge badge-green">Good {st.good || 0}</span>
+          <span className="badge badge-amber">Under {st.under || 0}</span>
+          <span className="badge badge-red">Over {st.over || 0}</span>
+        </div>
+        <p className="muted small" style={{ margin: 0 }}>
+          Total {st.done || 0} of {st.prescribed || item.sets * item.reps_per_set} reps
+        </p>
+        <div className="live-actions">
+          <button className="btn btn-primary" disabled={stopping} onClick={() => stop(false)}>
+            {stopping ? "Stopping..." : "Finish session"}
+          </button>
+          <button className="btn btn-outline danger-text" disabled={stopping} onClick={() => stop(true)}>
+            I feel pain - stop
+          </button>
+        </div>
+      </aside>
+    </section>
+  );
 }
 
 export default function ExerciseSession() {
@@ -30,18 +134,11 @@ export default function ExerciseSession() {
   const [stage, setStage] = useState("check");
   const [notWell, setNotWell] = useState(null); // reason text while the "not well" form is open
   const [input, setInput] = useState(null); // { mode: "video" | "camera", video, available }
-
-  // guided state
-  const [setsDone, setSetsDone] = useState(0);
-  const [elapsed, setElapsed] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const [rest, setRest] = useState(0);
-  const [painStop, setPainStop] = useState(false);
-  const requestId = useRef(newRequestId());
+  const [stream, setStream] = useState(null); // { port, token } of the running session
+  const [starting, setStarting] = useState(false);
 
   // result
   const [session, setSession] = useState(null);
-  const [pending, setPending] = useState(null); // guided result waiting to be (re)sent
   const [saving, setSaving] = useState(false);
   const [pain, setPain] = useState(2);
   const [note, setNote] = useState("");
@@ -65,16 +162,6 @@ export default function ExerciseSession() {
     return () => clearInterval(pollRef.current);
   }, [planId]);
 
-  // guided timer (paused time and rest countdown handled separately)
-  useEffect(() => {
-    if (stage !== "guided" || paused) return undefined;
-    const t = setInterval(() => {
-      setElapsed((e) => e + 1);
-      setRest((r) => (r > 0 ? r - 1 : 0));
-    }, 1000);
-    return () => clearInterval(t);
-  }, [stage, paused]);
-
   // ---------- not well today ----------
   async function sendNotWell(e) {
     e.preventDefault();
@@ -86,14 +173,16 @@ export default function ExerciseSession() {
     }
   }
 
-  // ---------- with the camera ----------
+  // ---------- start tracking ----------
   // useCamera: live webcam even when test videos are the default input
-  async function startCamera(useCamera = false) {
+  async function startTracking(useCamera) {
     setError("");
+    setStarting(true);
     try {
       const current = await api.mySessions();
       lastIdRef.current = current.length ? Math.max(...current.map((s) => s.id)) : 0;
-      await api.startSession(item.id, useCamera);
+      const res = await api.startSession(item.id, useCamera);
+      setStream(res.stream);
       setStage("tracked");
       clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
@@ -111,50 +200,14 @@ export default function ExerciseSession() {
       }, POLL_MS);
     } catch (e) {
       setError(e.message);
-    }
-  }
-
-  // ---------- without the camera (guided) ----------
-  function setDone() {
-    const n = setsDone + 1;
-    setSetsDone(n);
-    if (n >= item.sets) finishGuided(n, false, false);
-    else setRest(item.rest_s || 0);
-  }
-
-  async function finishGuided(sets, stopped, pained) {
-    const body = {
-      plan_id: item.id,
-      sets_done: sets,
-      stopped,
-      pain_stop: pained,
-      duration_s: elapsed,
-      client_request_id: requestId.current,
-    };
-    setPending(body);
-    await sendGuided(body);
-  }
-
-  async function sendGuided(body) {
-    setSaving(true);
-    setError("");
-    try {
-      const s = await api.guidedSession(body);
-      setSession(s);
-      setPending(null);
-      setStage("after");
-    } catch (e) {
-      // keep the result and let the patient retry - never pretend it was saved
-      setError(`Not saved yet: ${e.message}`);
-      setStage("unsaved");
     } finally {
-      setSaving(false);
+      setStarting(false);
     }
   }
 
-  function stopGuided() {
-    if (!window.confirm("Stop this exercise now? What you did so far is saved as 'stopped early'.")) return;
-    finishGuided(setsDone, true, false);
+  // the runner saves what was done; "I feel pain" pre-sets a higher pain score for the question that follows
+  function onStopped(painStop) {
+    if (painStop) setPain(6);
   }
 
   // ---------- after ----------
@@ -174,7 +227,7 @@ export default function ExerciseSession() {
 
   if (!item) {
     return (
-      <div className="narrow">
+      <div className="session-page">
         <Link to="/patient" className="back">
           ← Today
         </Link>
@@ -183,26 +236,24 @@ export default function ExerciseSession() {
     );
   }
 
-  const inSession = stage === "guided" || stage === "tracked";
-
   return (
-    <div className="narrow session-page">
-      {!inSession && (
+    <div className="session-page">
+      {stage !== "tracked" && (
         <Link to="/patient" className="back">
           ← Today
         </Link>
       )}
-      <div className="page-head">
+      <div className="dash-head">
         <div>
           <h1>{item.exercise_name}</h1>
-          <p className="muted">
+          <p>
             {item.sets} × {item.reps_per_set} reps · target {item.min_angle}°–{item.max_angle}° (approx.)
             {item.hold_s ? ` · hold ${item.hold_s}s` : ""} · {item.side === "BOTH" ? "both sides" : `${item.side.toLowerCase()} side`}
           </p>
         </div>
       </div>
 
-      <SafetyNote onStop={stage === "guided" ? stopGuided : null} />
+      <SafetyNote />
       {error && <div className="alert alert-red">{error}</div>}
 
       {/* ---------- check ---------- */}
@@ -242,170 +293,44 @@ export default function ExerciseSession() {
         </div>
       )}
 
-      {/* ---------- choose mode ---------- */}
+      {/* ---------- choose the camera / test video ---------- */}
       {stage === "choose" && (
-        <div className="grid-2">
-          <div className="card">
-            <h3>With the camera</h3>
-            {cameraAllowed ? (
-              <>
-                <p className="muted">
-                  A ReHabRep window opens on this computer, counts your reps and gives spoken cues. Stand{" "}
-                  {item.view === "side" ? "side-on to" : "facing"} the camera with the{" "}
-                  {item.joint ? item.joint.toLowerCase() : "body part"} clearly visible, in good light.
-                </p>
-                {input && input.mode === "video" ? (
-                  <>
-                    <button className="btn btn-primary btn-lg btn-block" onClick={() => startCamera(true)}>
-                      Start with my camera
-                    </button>
-                    <p className="source-box muted small">
-                      {input.available ? (
-                        <>
-                          Or test with the recorded video <code>{input.video}</code> instead of the live camera.
-                        </>
-                      ) : (
-                        <>There is no recorded test video for this exercise yet.</>
-                      )}
-                    </p>
-                    {input.available && (
-                      <button className="btn btn-outline btn-lg btn-block" onClick={() => startCamera(false)}>
-                        Start with test video
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <button className="btn btn-primary btn-lg btn-block" onClick={() => startCamera(false)}>
-                    Start with camera
+        <div className="card">
+          <h3>Start your session</h3>
+          {cameraAllowed ? (
+            <>
+              <p className="muted">
+                Your live video appears below on this page. ReHabRep counts your reps and gives spoken cues. Stand{" "}
+                {item.view === "side" ? "side-on to" : "facing"} the camera with your{" "}
+                {item.joint ? item.joint.toLowerCase() : "body part"} clearly visible, in good light.
+              </p>
+              <div className="start-actions">
+                <button className="btn btn-primary btn-lg" disabled={starting} onClick={() => startTracking(true)}>
+                  <Icon name="camera" size={20} /> {starting ? "Starting..." : "Start with my camera"}
+                </button>
+                {input && input.mode === "video" && input.available && (
+                  <button className="btn btn-outline btn-lg" disabled={starting} onClick={() => startTracking(false)}>
+                    <Icon name="play" size={18} /> Start with test video
                   </button>
                 )}
-              </>
-            ) : (
-              <p className="muted">
-                Camera use is off in your consent choices. You can turn it on in <Link to="/patient/settings">Settings</Link>.
-              </p>
-            )}
-          </div>
-          <div className="card">
-            <h3>Without the camera</h3>
-            <p className="muted">
-              Follow the instructions and tap <b>Set done</b> after each set. Nothing is measured - the report says you
-              confirmed it yourself.
-            </p>
-            <button className="btn btn-outline btn-lg btn-block" onClick={() => setStage("guided")}>
-              Do it without camera
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ---------- camera session running ---------- */}
-      {stage === "tracked" && (
-        <div className="card highlight">
-          <h3>Exercise window is open</h3>
-          <p>
-            Follow the voice and on-screen cues. To stop at any time press <b>Q</b> in the exercise window. This page
-            updates by itself when the session is saved.
-          </p>
-          <div className="waiting">
-            <span className="spinner" /> Waiting for your session to finish...
-          </div>
-          <button
-            className="btn btn-ghost"
-            onClick={() => {
-              clearInterval(pollRef.current);
-              setStage("choose");
-            }}
-          >
-            Stop waiting
-          </button>
-        </div>
-      )}
-
-      {/* ---------- guided ---------- */}
-      {stage === "guided" && (
-        <div className="card guided">
-          <div className="guided-top">
-            <div>
-              <div className="counter">
-                Set {Math.min(setsDone + 1, item.sets)} <span>of {item.sets}</span>
               </div>
-              <div className="muted">
-                {item.reps_per_set} reps{item.hold_s ? `, hold ${item.hold_s}s each` : ""}
-              </div>
-            </div>
-            <div className="timer" aria-label="Exercise time">
-              {fmtTime(elapsed)}
-              {paused && <span className="badge badge-amber">Paused</span>}
-            </div>
-          </div>
-          <p className="instructions">{item.instructions}</p>
-          {rest > 0 ? (
-            <div className="rest-box">
-              Rest <b>{rest}s</b> before the next set.
-              <button className="btn btn-ghost btn-sm" onClick={() => setRest(0)}>
-                Skip rest
-              </button>
-            </div>
+              {input && input.mode === "video" && input.available && (
+                <p className="muted small" style={{ margin: "10px 0 0" }}>
+                  The test video plays the recording <code>{input.video}</code> instead of your camera.
+                </p>
+              )}
+            </>
           ) : (
-            <button className="btn btn-primary btn-xl btn-block" disabled={paused || saving} onClick={setDone}>
-              Set {setsDone + 1} done
-            </button>
+            <p className="muted">
+              Camera use is off in your consent choices. Turn it on in <Link to="/patient/settings">Settings</Link> to
+              exercise with ReHabRep.
+            </p>
           )}
-          <div className="row-gap">
-            <button className="btn btn-outline" onClick={() => setPaused((p) => !p)}>
-              {paused ? "Resume" : "Pause"}
-            </button>
-            <button
-              className="btn btn-outline danger-text"
-              onClick={() => {
-                setPaused(true);
-                setPainStop(true);
-                setStage("painstop");
-              }}
-            >
-              I feel pain
-            </button>
-          </div>
         </div>
       )}
 
-      {/* ---------- I feel pain ---------- */}
-      {stage === "painstop" && (
-        <div className="card">
-          <h3>Stop the exercise</h3>
-          <p>
-            Stop if the pain is sharp, getting worse or unusual. Rest, and tell your therapist. If it is severe, or you
-            have chest pain, fainting or numbness, call <b>108</b> or go to the nearest hospital.
-          </p>
-          <p className="muted small">The app does not judge what the pain means - your therapist will review it.</p>
-          <div className="row-gap">
-            <button className="btn btn-primary" disabled={saving} onClick={() => finishGuided(setsDone, true, painStop)}>
-              End session and tell my therapist
-            </button>
-            <button
-              className="btn btn-ghost"
-              onClick={() => {
-                setPainStop(false);
-                setStage("guided");
-              }}
-            >
-              It has passed - continue
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ---------- save failed ---------- */}
-      {stage === "unsaved" && pending && (
-        <div className="card">
-          <h3>Your session is not saved yet</h3>
-          <p className="muted">Check your internet connection and try again. Your therapist has not received it yet.</p>
-          <button className="btn btn-primary" disabled={saving} onClick={() => sendGuided(pending)}>
-            {saving ? "Trying..." : "Retry upload"}
-          </button>
-        </div>
-      )}
+      {/* ---------- live session ---------- */}
+      {stage === "tracked" && stream && <LiveSession stream={stream} item={item} onStop={onStopped} />}
 
       {/* ---------- after: pain + note ---------- */}
       {stage === "after" && session && (
