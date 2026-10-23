@@ -18,9 +18,21 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session as DbSession
 
+from clock import local_now
 from crypto import blind_index, decrypt_bytes, encrypt_bytes
 from database import DATA_DIR
-from models import AuditLog, ExercisePlan, Invitation, Patient, Prescription, RepLog, Session, TherapistProfile, User
+from models import (
+    AuditLog,
+    ConsentRecord,
+    ExercisePlan,
+    Invitation,
+    Patient,
+    Prescription,
+    RepLog,
+    Session,
+    TherapistProfile,
+    User,
+)
 
 CREDENTIAL_DIR = os.path.join(DATA_DIR, "credentials")  # encrypted credential files (never public)
 NO_PASSWORD = "!"  # stored as password_hash until an invited patient sets their own password
@@ -384,16 +396,114 @@ def get_active_plans(db: DbSession, patient_id):
 
 
 # ---------------------------------------------------------------------------
+# Consent
+# ---------------------------------------------------------------------------
+def latest_consent(db: DbSession, user_id):
+    rows = db.query(ConsentRecord).filter(ConsentRecord.user_id == user_id).all()
+    return max(rows, key=lambda r: r.id) if rows else None
+
+
+def record_consent(db: DbSession, user_id, version, action, camera_allowed):
+    rec = ConsentRecord(
+        user_id=user_id, version=version, action=action, camera_allowed=camera_allowed, created_at=datetime.utcnow()
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+def consent_history(db: DbSession, user_id):
+    return sorted(db.query(ConsentRecord).filter(ConsentRecord.user_id == user_id).all(), key=lambda r: r.id, reverse=True)
+
+
+# ---------------------------------------------------------------------------
 # Sessions
 # ---------------------------------------------------------------------------
+def tracked_status(reps_done, prescribed):
+    if prescribed and reps_done >= prescribed:
+        return "COMPLETED"
+    return "PARTIAL" if reps_done > 0 else "INTERRUPTED"
+
+
+def find_by_request_id(db: DbSession, patient_id, client_request_id):
+    if not client_request_id:
+        return None
+    s = db.query(Session).filter(Session.client_request_id == client_request_id).first()
+    return s if s is not None and s.patient_id == patient_id else None
+
+
+def save_guided_session(
+    db: DbSession, plan: ExercisePlan, sets_done, stopped=False, duration_s=None, client_request_id=None,
+    review_flag=None,
+):
+    """Patient-confirmed session: nothing is measured, so measurement columns stay empty."""
+    sets_done = max(0, min(int(sets_done), plan.sets))
+    if sets_done >= plan.sets:
+        status = "COMPLETED"
+    elif stopped:
+        status = "INTERRUPTED"
+    else:
+        status = "PARTIAL" if sets_done > 0 else "INTERRUPTED"
+    ended_at = local_now()
+    reps_done = sets_done * plan.reps_per_set
+    session = Session(
+        patient_id=plan.patient_id,
+        plan_id=plan.id,
+        client_request_id=client_request_id,
+        mode="GUIDED",
+        status=status,
+        review_flag=review_flag,
+        started_at=ended_at - timedelta(seconds=duration_s or 0),
+        ended_at=ended_at,
+        min_angle=plan.min_angle,
+        max_angle=plan.max_angle,
+        prescribed_reps=plan.prescribed_reps,
+        reps_done=reps_done,
+        completion_pct=round(100.0 * reps_done / plan.prescribed_reps, 1) if plan.prescribed_reps else None,
+        duration_s=duration_s,
+        source="guided",
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def save_skip(db: DbSession, plan: ExercisePlan, reason=None, not_well=False, client_request_id=None):
+    now = local_now()
+    session = Session(
+        patient_id=plan.patient_id,
+        plan_id=plan.id,
+        client_request_id=client_request_id,
+        mode="NONE",
+        status="SKIPPED",
+        review_flag="NOT_WELL" if not_well else None,
+        patient_note=reason,
+        started_at=now,
+        ended_at=now,
+        min_angle=plan.min_angle,
+        max_angle=plan.max_angle,
+        prescribed_reps=plan.prescribed_reps,
+        reps_done=0,
+        source="skipped",
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
 def save_session(db: DbSession, plan: ExercisePlan, summary, reps, source=None, pain_score=None, ended_at=None):
-    """Store one finished session + its reps. `summary` comes from RepCounter.summary()."""
-    ended_at = ended_at or datetime.now()
+    """Store one finished CAMERA-TRACKED session + its reps. `summary` comes from RepCounter.summary()."""
+    ended_at = ended_at or local_now()
     started_at = ended_at - timedelta(seconds=summary.get("duration_s") or 0)
 
     session = Session(
         patient_id=plan.patient_id,
         plan_id=plan.id,
+        mode="TRACKED",
+        status=tracked_status(summary["reps_done"], summary["prescribed_reps"]),
         started_at=started_at,
         ended_at=ended_at,
         min_angle=plan.min_angle,

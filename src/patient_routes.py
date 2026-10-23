@@ -24,13 +24,13 @@ Rules
 
 import os
 import re
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
+from clock import iso_utc
 from crud import (
     accept_invitation,
     change_prescription_status,
@@ -82,7 +82,7 @@ def send_invitation(db: DbSession, therapist: User, patient: Patient) -> dict:
     print(f"[EMAIL] Link    : {link}   (valid until {inv.expires_at:%d %b %Y %H:%M} UTC)")
     print("[EMAIL] -------------------------------------------\n")
     log_action(db, therapist.id, "PATIENT_INVITED", "PATIENT", patient.id, None)
-    return {"url": link, "expires_at": inv.expires_at.isoformat()}
+    return {"url": link, "expires_at": iso_utc(inv.expires_at)}
 
 
 def mask_email(email: str) -> str:
@@ -260,7 +260,7 @@ def invitation_info(token: str, db: DbSession = Depends(get_db)):
         "name": inv.user.name,
         "email": mask_email(inv.user.email),
         "therapist": inv.created_by.name if inv.created_by else None,
-        "expires_at": inv.expires_at.isoformat(),
+        "expires_at": iso_utc(inv.expires_at),
         "min_password_length": MIN_PASSWORD,
     }
 
@@ -276,7 +276,7 @@ def accept(token: str, body: AcceptIn, db: DbSession = Depends(get_db)):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Password must be at least {MIN_PASSWORD} characters")
     user = accept_invitation(db, inv, body.password)
     log_action(db, user.id, "INVITE_ACCEPTED", "USER", user.id, None)
-    return {"token": make_token(user), "user": user_out(user)}
+    return {"token": make_token(user), "user": user_out(user, db)}
 
 
 # ---------------------------------------------------------------------------

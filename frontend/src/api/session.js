@@ -48,5 +48,6 @@ export function homeFor(user) {
   if (user.role === "THERAPIST") {
     return user.therapist && user.therapist.status === "APPROVED" ? "/therapist" : "/therapist/verification";
   }
+  if (user.role === "PATIENT" && (!user.consent || user.consent.needs_consent)) return "/patient/consent";
   return "/patient";
 }

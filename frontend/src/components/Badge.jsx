@@ -60,3 +60,22 @@ export function PlanStatusBadge({ status }) {
   const [cls, label] = map[status] || ["grey", status || "No plan"];
   return <span className={`badge badge-${cls}`}>{label}</span>;
 }
+
+export function SessionStatusBadge({ status }) {
+  const map = {
+    COMPLETED: ["green", "Completed"],
+    PARTIAL: ["amber", "Partly done"],
+    INTERRUPTED: ["red", "Stopped early"],
+    SKIPPED: ["grey", "Skipped"],
+    DONE: ["green", "Done"],
+    PENDING: ["grey", "To do"],
+  };
+  const [cls, label] = map[status] || ["grey", status || "-"];
+  return <span className={`badge badge-${cls}`}>{label}</span>;
+}
+
+export function ModeBadge({ mode }) {
+  if (mode === "GUIDED") return <span className="badge badge-grey">Patient-confirmed</span>;
+  if (mode === "NONE") return null;
+  return <span className="badge badge-green">Camera-measured</span>;
+}

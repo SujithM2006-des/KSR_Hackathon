@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
+from clock import iso_utc
 from crud import create_user, get_user_by_email, list_audit, log_action, read_credential_document
 from database import get_db
 from models import Patient, Session, TherapistProfile, User
@@ -67,7 +68,7 @@ def therapist_row(db: DbSession, user: User) -> dict:
         "account_status": user.status,
         "account_status_reason": user.status_reason,
         "patient_count": patient_count,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "created_at": iso_utc(user.created_at),
         "verification": therapist_status_out(profile),
         "register_check_note": profile.register_check_note if profile else None,
         "reviewed_by": profile.reviewed_by.name if profile and profile.reviewed_by else None,
@@ -251,7 +252,7 @@ def audit_log(limit: int = 200, admin: User = Depends(require_admin), db: DbSess
         out.append(
             {
                 "id": e.id,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "created_at": iso_utc(e.created_at),
                 "actor_id": e.actor_id,
                 "actor_name": actor[0],
                 "actor_role": actor[1],

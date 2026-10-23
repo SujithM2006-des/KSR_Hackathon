@@ -1,5 +1,5 @@
-/* ReHabRep - extra styles added in Phase 1 (admin, registration) and Phase 3 (invitations, prescription builder).
-   Imported after styles.css in main.jsx */
+/* ReHabRep - extra styles added in Phase 1 (admin, registration), Phase 3 (invitations, prescription builder)
+   and Phase 4 (consent, safety, patient today, guided sessions). Imported after styles.css in main.jsx */
 /* ---------- Phase 1: admin, registration, verification ---------- */
 textarea {
   font: inherit;
@@ -339,4 +339,169 @@ textarea:focus {
   .item-grid.two {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---------- Phase 4: consent, safety, patient today, guided session ---------- */
+.btn-lg {
+  padding: 12px 20px;
+  font-size: 16px;
+  min-height: 48px;
+}
+.btn-xl {
+  padding: 18px 24px;
+  font-size: 20px;
+  font-weight: 700;
+  min-height: 64px;
+  margin: 8px 0;
+}
+.grow {
+  flex: 1 1 auto;
+}
+.danger-text {
+  color: var(--red);
+  border-color: var(--red);
+}
+.plain-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.plain-list li {
+  margin-bottom: 4px;
+}
+.check-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+.check-row input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--primary);
+}
+
+.safety-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #7c2d12;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+.safety-page {
+  max-width: 680px;
+}
+.safety-page h3 {
+  margin-top: 18px;
+}
+.emergency {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--red-soft);
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin: 10px 0 6px;
+  font-weight: 600;
+  color: #991b1b;
+}
+.emergency a {
+  background: var(--red);
+  color: #fff;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.flag-list li {
+  margin-bottom: 4px;
+}
+
+.consent-card section {
+  margin-bottom: 14px;
+}
+.consent-card section p {
+  margin: 4px 0 0;
+}
+.consent-actions,
+.big-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 14px 0 8px;
+}
+.consent-actions .btn,
+.big-actions .btn {
+  flex: 1 1 220px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.section-head h2 {
+  margin: 0;
+}
+.rule-note {
+  margin: -8px 0 16px;
+}
+.plan-card.is-done {
+  border-color: var(--green);
+}
+.other-days summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.other-days .plan-cards {
+  margin-top: 14px;
+}
+
+.guided-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.counter {
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.counter span {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.timer {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.rest-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--primary-soft);
+  border-radius: 10px;
+  padding: 16px;
+  font-size: 18px;
+  margin: 8px 0;
 }

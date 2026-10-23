@@ -4,25 +4,21 @@ ReHabRep - Turning database rows into JSON for the frontend (shared by all API m
 All values here are already DECRYPTED (the Encrypted* column types do that on load).
 """
 
-import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List
 
 from sqlalchemy.orm import Session as DbSession
 
+from clock import iso_local, iso_utc, local_now
+from consent import CONSENT_VERSION
 from crud import current_prescription, get_active_plans, get_sessions, latest_invitation, list_prescriptions
 from exercises import EXERCISES, resolve_exercise
 from models import Patient, Prescription, Session
 
 HIGH_PAIN = 7
-RECENT_SESSIONS = 5  # sessions used for the adherence badge
-# Patient time zone for "today" (minutes from UTC). Default India, UTC+05:30 (no daylight saving).
-TZ_OFFSET_MIN = int(os.getenv("REHABREP_TZ_OFFSET_MIN", "330"))
+RECENT_SESSIONS = 5  # measured sessions used for the adherence badge
+REVIEW_DAYS = 7  # "not well" / "stopped for pain" flags shown to the therapist for this many days
 DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-
-def local_now() -> datetime:
-    return datetime.utcnow() + timedelta(minutes=TZ_OFFSET_MIN)
 
 
 def parse_days(text):
@@ -32,7 +28,8 @@ def parse_days(text):
 
 
 def _iso(dt):
-    return dt.isoformat() if dt else None
+    """UTC timestamps (plans, invitations, consent). Session times use iso_local."""
+    return iso_utc(dt)
 
 
 def exercise_info(key) -> dict:
@@ -108,8 +105,14 @@ def session_out(s: Session, with_reps=False) -> dict:
         "patient_id": s.patient_id,
         "plan_id": s.plan_id,
         **exercise_info(s.plan.exercise_type if s.plan else "mini_squat"),
-        "started_at": s.started_at.isoformat() if s.started_at else None,
-        "ended_at": s.ended_at.isoformat() if s.ended_at else None,
+        "side": (s.plan.side if s.plan else None) or "BOTH",
+        "mode": s.mode or "TRACKED",  # TRACKED | GUIDED | NONE
+        "status": s.status or "COMPLETED",  # COMPLETED | PARTIAL | INTERRUPTED | SKIPPED
+        "measured": (s.mode or "TRACKED") == "TRACKED",
+        "review_flag": s.review_flag,
+        "patient_note": s.patient_note,
+        "started_at": iso_local(s.started_at),
+        "ended_at": iso_local(s.ended_at),
         "min_angle": s.min_angle,
         "max_angle": s.max_angle,
         "prescribed_reps": s.prescribed_reps,
@@ -142,8 +145,8 @@ def session_out(s: Session, with_reps=False) -> dict:
 
 
 def adherence_badge(sessions: List[Session]) -> dict:
-    """Badge from the average adherence of the most recent sessions."""
-    recent = sessions[:RECENT_SESSIONS]
+    """Badge from the average adherence of the most recent MEASURED sessions (guided/skipped have no score)."""
+    recent = [s for s in sessions if s.adherence_pct is not None][:RECENT_SESSIONS]
     if not recent:
         return {"color": "grey", "label": "No sessions yet", "avg_adherence_pct": None}
     avg = round(sum(s.adherence_pct for s in recent) / len(recent), 1)
@@ -178,8 +181,42 @@ def patient_summary(db: DbSession, p: Patient) -> dict:
         "has_draft_plan": has_draft,
         "active_plans": [plan_out(pl) for pl in get_active_plans(db, p.id)],
         "sessions_count": len(sessions),
-        "last_session_at": last.ended_at.isoformat() if last else None,
+        "last_session_at": iso_local(last.ended_at) if last else None,
         "last_session": session_out(last) if last else None,
         "badge": adherence_badge(sessions),
         "pain_alert": any(s.pain_score is not None and s.pain_score >= HIGH_PAIN for s in recent),
+        "review_flags": review_flags(sessions),
+    }
+
+
+def review_flags(sessions: List[Session]) -> list:
+    """Recent 'not well today' skips and 'stopped because of pain' sessions for the therapist to review."""
+    since = local_now() - timedelta(days=REVIEW_DAYS)
+    out = []
+    for s in sessions:
+        if s.review_flag and s.ended_at and s.ended_at >= since:
+            out.append(
+                {
+                    "session_id": s.id,
+                    "flag": s.review_flag,
+                    "date": iso_local(s.ended_at),
+                    "exercise_name": exercise_info(s.plan.exercise_type if s.plan else "")["exercise_name"],
+                    "note": s.patient_note,
+                }
+            )
+    return out
+
+
+def consent_out(rec) -> dict:
+    if rec is None:
+        return {"given": False, "camera_allowed": False, "version": None, "current_version": CONSENT_VERSION,
+                "needs_consent": True, "updated_at": None}
+    return {
+        "given": True,
+        "camera_allowed": bool(rec.camera_allowed),
+        "version": rec.version,
+        "current_version": CONSENT_VERSION,
+        "needs_consent": rec.version != CONSENT_VERSION,  # text changed -> ask again
+        "action": rec.action,
+        "updated_at": _iso(rec.created_at),
     }

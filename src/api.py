@@ -15,6 +15,7 @@ GENERAL
 THERAPIST REGISTRATION / VERIFICATION   -> therapist_routes.py
 ADMIN                                   -> admin_routes.py
 ADD PATIENT, INVITATIONS, PRESCRIPTIONS -> patient_routes.py
+CONSENT, SAFETY, TODAY, GUIDED / SKIP   -> me_routes.py
 
 THERAPIST (verified only)
   GET   /patients                        patient list + adherence badge + pain flag
@@ -25,9 +26,9 @@ THERAPIST (verified only)
 
 PATIENT
   GET   /my/plans                        active plan items (with days, time, side, scheduled_today)
-  POST  /my/sessions/start               opens the exercise window (session_runner)
+  POST  /my/sessions/start               opens the camera exercise window (needs camera consent)
   GET   /my/sessions                     my past sessions
-  PATCH /sessions/{id}/pain              pain check-in (0-10) after a session
+  PATCH /sessions/{id}/pain              pain check-in (0-10) + optional note after a session
 """
 
 import os
@@ -42,9 +43,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
 import admin_routes
+import me_routes
 import patient_routes
 import therapist_routes
-from crud import get_active_plans, get_sessions, get_user_by_email, verify_password
+from crud import get_active_plans, get_sessions, get_user_by_email, latest_consent, verify_password
 from database import PROJECT_ROOT, get_db, init_db
 from exercises import exercise_list
 from models import Patient, Session, User
@@ -69,6 +71,7 @@ app.add_middleware(
 app.include_router(therapist_routes.router)
 app.include_router(admin_routes.router)
 app.include_router(patient_routes.router)
+app.include_router(me_routes.router)
 
 
 @app.on_event("startup")
@@ -90,7 +93,8 @@ class StartIn(BaseModel):
 
 
 class PainIn(BaseModel):
-    pain_score: int = Field(ge=0, le=10)
+    pain_score: Optional[int] = Field(None, ge=0, le=10)  # None = skipped the pain question
+    note: Optional[str] = Field(None, max_length=500)
 
 
 # ---------------------------------------------------------------------------
@@ -117,12 +121,12 @@ def login(body: LoginIn, db: DbSession = Depends(get_db)):
     if user.status == "SUSPENDED":
         reason = f" Reason: {user.status_reason}" if user.status_reason else ""
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"This account is suspended.{reason}")
-    return {"token": make_token(user), "user": user_out(user)}
+    return {"token": make_token(user), "user": user_out(user, db)}
 
 
 @app.get("/me")
-def me(user: User = Depends(current_user)):
-    return user_out(user)
+def me(user: User = Depends(current_user), db: DbSession = Depends(get_db)):
+    return user_out(user, db)
 
 
 @app.get("/exercises")
@@ -153,7 +157,8 @@ def patient_sessions(patient_id: int, therapist: User = Depends(require_therapis
 @app.get("/patients/{patient_id}/trend")
 def patient_trend(patient_id: int, therapist: User = Depends(require_therapist), db: DbSession = Depends(get_db)):
     therapist_patient(db, therapist, patient_id)
-    sessions = list(reversed(get_sessions(db, patient_id)))  # oldest first for charts
+    # oldest first; only camera-measured sessions have angles to chart
+    sessions = [s for s in reversed(get_sessions(db, patient_id)) if s.max_angle_reached is not None]
     return [
         {
             "session_id": s.id,
@@ -207,6 +212,12 @@ def start_session(body: StartIn, user: User = Depends(require_patient), db: DbSe
     plans = {p.id for p in get_active_plans(db, user.patient_profile.id)}
     if body.plan_id not in plans:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found")
+    consent = latest_consent(db, user.id)
+    if consent is None or not consent.camera_allowed:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Camera use is not allowed in your consent settings. Use 'Do it without camera' or allow the camera in Settings.",
+        )
 
     source = body.source or DEFAULT_DEMO_VIDEO
     if not source.isdigit() and not os.path.isfile(os.path.join(PROJECT_ROOT, source)) and not os.path.isfile(source):
@@ -229,6 +240,8 @@ def set_pain(session_id: int, body: PainIn, user: User = Depends(require_patient
     if s is None or s.patient_id != user.patient_profile.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     s.pain_score = body.pain_score
+    if body.note is not None:
+        s.patient_note = body.note.strip() or s.patient_note
     db.commit()
     db.refresh(s)
     return session_out(s)

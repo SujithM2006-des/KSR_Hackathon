@@ -27,6 +27,8 @@ const live = {
     request("POST", `/auth/invitations/${encodeURIComponent(token)}/accept`, { json: { password }, auth: false }).then(
       (r) => ({ ...r, user: mapUser(r.user) })
     ),
+  consentText: () => request("GET", "/consent", { auth: false }),
+  safety: () => request("GET", "/safety", { auth: false }),
   myVerification: () => request("GET", "/therapist/verification"),
   resubmitVerification: (formData) => request("POST", "/therapist/verification", { form: formData }),
 
@@ -55,8 +57,15 @@ const live = {
   mySessions: () => request("GET", "/my/sessions").then(mapList(mapSession)),
   startSession: (planId, source) =>
     request("POST", "/my/sessions/start", { json: { plan_id: planId, source: source || null } }),
-  setPain: (sessionId, pain) =>
-    request("PATCH", `/sessions/${sessionId}/pain`, { json: { pain_score: pain } }).then(mapSession),
+  setPain: (sessionId, pain, note) =>
+    request("PATCH", `/sessions/${sessionId}/pain`, { json: { pain_score: pain, note: note || null } }).then(mapSession),
+  today: () => request("GET", "/me/today"),
+  myConsent: () => request("GET", "/me/consent"),
+  giveConsent: (version, cameraAllowed) =>
+    request("POST", "/me/consent", { json: { version, camera_allowed: cameraAllowed } }).then(mapUser),
+  setCamera: (allow) => request("POST", "/me/consent/camera", { json: { allow } }).then(mapUser),
+  guidedSession: (data) => request("POST", "/my/sessions/guided", { json: data }).then(mapSession),
+  skipToday: (data) => request("POST", "/my/sessions/skip", { json: data }),
 
   // admin
   adminOverview: () => request("GET", "/admin/overview"),
@@ -85,6 +94,15 @@ export function fmtDate(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
   return d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+// one id per user action, so a double click or a retry never creates two sessions
+export function newRequestId() {
+  try {
+    return crypto.randomUUID().replace(/-/g, "");
+  } catch {
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+  }
 }
 
 export const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

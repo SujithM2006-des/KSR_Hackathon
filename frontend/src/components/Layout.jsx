@@ -12,11 +12,17 @@ const NAV = {
     ["/admin/audit", "Audit log"],
     ["/admin/admins", "Admins"],
   ],
+  PATIENT: [
+    ["/patient", "Today", true],
+    ["/patient/settings", "Settings"],
+    ["/safety", "Safety and help"],
+  ],
 };
 
 export default function Layout({ user, children }) {
   const navigate = useNavigate();
-  const links = NAV[user.role] || [];
+  const consentPending = user.role === "PATIENT" && (!user.consent || user.consent.needs_consent);
+  const links = consentPending ? [] : NAV[user.role] || [];
 
   function handleLogout() {
     logout();
@@ -58,7 +64,8 @@ export default function Layout({ user, children }) {
       )}
       <main className="content">{children}</main>
       <footer className="disclaimer">
-        Exercise aid only. Not a diagnosis. Follow your therapist's advice.
+        Exercise aid only. Not a diagnosis. Follow your therapist's advice. <Link to="/safety">Safety and help</Link> ·
+        Emergency: 112
       </footer>
     </div>
   );

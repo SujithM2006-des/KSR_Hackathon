@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate } from "../api.js";
-import { AccountBadge, AdherenceBadge, FollowedBadge, PlanStatusBadge } from "../components/Badge.jsx";
+import { AccountBadge, AdherenceBadge, FollowedBadge, PlanStatusBadge, SessionStatusBadge } from "../components/Badge.jsx";
 import InviteLinkBox from "../components/InviteLinkBox.jsx";
 
 const EMPTY = { name: "", email: "", surgery_type: "", notes: "" };
@@ -67,7 +67,8 @@ export default function TherapistDashboard() {
   const shown = q
     ? list.filter((p) => [p.name, p.email, p.surgery_type].some((v) => (v || "").toLowerCase().includes(q)))
     : list;
-  const alerts = list.filter((p) => p.pain_alert || p.badge.color === "red");
+  const flagged = (p) => p.review_flags && p.review_flags.length > 0;
+  const alerts = list.filter((p) => p.pain_alert || p.badge.color === "red" || flagged(p));
   const onTrack = list.filter((p) => p.badge.color === "green").length;
   const waiting = list.filter((p) => p.account_status === "INVITED" || p.account_status === "DRAFT").length;
 
@@ -165,7 +166,13 @@ export default function TherapistDashboard() {
             <span key={p.id}>
               {i > 0 && ", "}
               <Link to={`/therapist/patients/${p.id}`}>{p.name}</Link>
-              {p.pain_alert ? " (high pain reported)" : " (not following plan)"}
+              {p.pain_alert
+                ? " (high pain reported)"
+                : flagged(p)
+                ? p.review_flags.some((f) => f.flag === "PAIN_STOP")
+                  ? " (stopped because of pain)"
+                  : " (not well - skipped)"
+                : " (not following plan)"}
             </span>
           ))}
         </div>
@@ -232,9 +239,16 @@ export default function TherapistDashboard() {
                     <td>{fmtDate(p.last_session_at)}</td>
                     <td>
                       {last ? (
-                        <>
-                          {last.good_reps}/{last.prescribed_reps} correct <FollowedBadge value={last.plan_followed} />
-                        </>
+                        last.measured ? (
+                          <>
+                            {last.good_reps}/{last.prescribed_reps} correct <FollowedBadge value={last.plan_followed} />
+                          </>
+                        ) : (
+                          <>
+                            <SessionStatusBadge status={last.status} />{" "}
+                            {last.mode === "GUIDED" && <span className="muted small">patient-confirmed</span>}
+                          </>
+                        )
                       ) : (
                         <span className="muted">-</span>
                       )}

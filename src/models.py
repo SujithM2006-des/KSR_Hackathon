@@ -10,8 +10,9 @@ prescriptions      one VERSION of a patient's plan (DRAFT | ACTIVE | PAUSED | EN
 exercise_plans     one prescribed exercise inside a prescription version (sets, reps, hold, rest,
                    side, angle range, days, time). Sessions point at this row, so editing a plan
                    (= a new version with new rows) never changes old session reports.
-sessions        one row per exercise session (the adherence report)
-rep_logs        one row per rep inside a session
+consent_records    each consent decision a patient makes (version of the text, camera yes/no, withdrawals)
+sessions           one row per exercise session: camera-tracked, patient-confirmed (guided) or skipped
+rep_logs           one row per rep inside a camera-tracked session
 
 Encryption (see crypto.py):
   EVERY data column is stored ENCRYPTED (names, emails, roles, surgery type,
@@ -122,6 +123,22 @@ class Invitation(Base):
     created_by = relationship("User", foreign_keys=[created_by_id])
 
 
+class ConsentRecord(Base):
+    """Append-only: the newest record for a user is their current consent state."""
+
+    __tablename__ = "consent_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # all encrypted
+    version = Column(EncryptedText, nullable=False)  # consent text version shown to the patient
+    action = Column(EncryptedText, nullable=False)  # AGREED | AGREED_NO_CAMERA | CAMERA_WITHDRAWN | CAMERA_ALLOWED
+    camera_allowed = Column(EncryptedBool, nullable=False, default=False)
+    created_at = Column(EncryptedDateTime, default=datetime.utcnow)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
 class Patient(Base):
     __tablename__ = "patients"
 
@@ -197,12 +214,26 @@ class ExercisePlan(Base):
 
 
 class Session(Base):
+    """
+    One exercise session for one plan item.
+      mode   TRACKED (camera measured) | GUIDED (patient-confirmed, nothing measured) | NONE (skipped)
+      status COMPLETED | PARTIAL | INTERRUPTED | SKIPPED
+    Guided and skipped sessions keep the measurement columns EMPTY (shown as "Unavailable"),
+    so reports never mix measured and patient-confirmed numbers.
+    Start/end times are the patient's local time (see clock.py).
+    """
+
     __tablename__ = "sessions"
 
     id = Column(Integer, primary_key=True, index=True)
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
     plan_id = Column(Integer, ForeignKey("exercise_plans.id"), nullable=False)
+    client_request_id = Column(String(64), unique=True, nullable=True, index=True)  # stops double-submits
     # all encrypted
+    mode = Column(EncryptedText, nullable=False, default="TRACKED")
+    status = Column(EncryptedText, nullable=False, default="COMPLETED")
+    review_flag = Column(EncryptedText, nullable=True)  # NOT_WELL | PAIN_STOP -> therapist should review
+    patient_note = Column(EncryptedText, nullable=True)  # patient's own note / skip reason
     started_at = Column(EncryptedDateTime, default=datetime.utcnow)
     ended_at = Column(EncryptedDateTime, default=datetime.utcnow)
 
@@ -211,17 +242,17 @@ class Session(Base):
     max_angle = Column(EncryptedFloat, nullable=False)
     prescribed_reps = Column(EncryptedInt, nullable=False)
 
-    reps_done = Column(EncryptedInt, nullable=False, default=0)
-    good_reps = Column(EncryptedInt, nullable=False, default=0)
-    under_reps = Column(EncryptedInt, nullable=False, default=0)
-    over_reps = Column(EncryptedInt, nullable=False, default=0)
-    accuracy_pct = Column(EncryptedFloat, nullable=False, default=0.0)
-    completion_pct = Column(EncryptedFloat, nullable=False, default=0.0)
-    adherence_pct = Column(EncryptedFloat, nullable=False, default=0.0)
+    reps_done = Column(EncryptedInt, nullable=False, default=0)  # guided: patient-confirmed reps
+    good_reps = Column(EncryptedInt, nullable=True)  # measured only (None for guided / skipped)
+    under_reps = Column(EncryptedInt, nullable=True)
+    over_reps = Column(EncryptedInt, nullable=True)
+    accuracy_pct = Column(EncryptedFloat, nullable=True)
+    completion_pct = Column(EncryptedFloat, nullable=True)
+    adherence_pct = Column(EncryptedFloat, nullable=True)
     max_angle_reached = Column(EncryptedFloat, nullable=True)
     avg_peak_angle = Column(EncryptedFloat, nullable=True)
     duration_s = Column(EncryptedFloat, nullable=True)
-    plan_followed = Column(EncryptedText, nullable=False, default="NO")  # YES | PARTLY | NO
+    plan_followed = Column(EncryptedText, nullable=True)  # YES | PARTLY | NO (measured sessions only)
     pain_score = Column(EncryptedInt, nullable=True)  # 0-10, patient check-in
     source = Column(EncryptedText, nullable=True)
 

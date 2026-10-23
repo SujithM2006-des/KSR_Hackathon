@@ -39,6 +39,7 @@ const db = {
   prescriptions: [{ id: 1, patient_id: 1, created_by: 2, version: 1, status: "ACTIVE", note: null, status_reason: null, previous_id: null, created_at: daysAgo(5), activated_at: daysAgo(5), ended_at: null }],
   plans: [{ id: 1, patient_id: 1, prescription_id: 1, exercise_type: "mini_squat", condition: "Knee replacement (left)", sets: 1, reps_per_set: 8, hold_s: 0, rest_s: 30, side: "BOTH", min_angle: 90, max_angle: 135, days: [0, 1, 2, 3, 4, 5, 6], time_of_day: null, note: null, active: true, created_at: daysAgo(5) }],
   invites: {}, // token -> { user_id, used, revoked, expires_at }
+  consents: [], // { user_id, version, action, camera_allowed, created_at }
   sessions: [],
   audit: [],
   nextId: 100,
@@ -53,7 +54,7 @@ const db = {
       id: i + 1, patient_id: 1, plan_id: 1, ended_at: daysAgo(d), started_at: daysAgo(d), min_angle: 90, max_angle: 135, prescribed_reps: 8,
       reps_done: 8, good_reps: good, under_reps: reps.filter((r) => r.result === "UNDER").length, over_reps: reps.filter((r) => r.result === "OVER").length,
       accuracy_pct: (good / 8) * 100, completion_pct: 100, adherence_pct: (good / 8) * 100, max_angle_reached: Math.max(...peaks),
-      avg_peak_angle: peaks.reduce((a, b) => a + b, 0) / 8, duration_s: 16, plan_followed: good >= 6.4 ? "YES" : good >= 3.2 ? "PARTLY" : "NO", pain_score: pain, reps,
+      avg_peak_angle: peaks.reduce((a, b) => a + b, 0) / 8, duration_s: 16, mode: "TRACKED", status: "COMPLETED", review_flag: null, patient_note: null, plan_followed: good >= 6.4 ? "YES" : good >= 3.2 ? "PARTLY" : "NO", pain_score: pain, reps,
     });
   }
 );
@@ -79,9 +80,15 @@ function therapistOut(u) {
   const p = db.profiles[u.id];
   return p ? { ...p } : null;
 }
+const CONSENT_VERSION = "2026-10-v1";
+function consentOut(userId) {
+  const rec = db.consents.filter((c) => c.user_id === userId).slice(-1)[0];
+  if (!rec) return { given: false, camera_allowed: false, version: null, current_version: CONSENT_VERSION, needs_consent: true, updated_at: null };
+  return { given: true, camera_allowed: rec.camera_allowed, version: rec.version, current_version: CONSENT_VERSION, needs_consent: rec.version !== CONSENT_VERSION, action: rec.action, updated_at: rec.created_at };
+}
 function userOut(u) {
   const patient = db.patients.find((p) => p.user_id === u.id);
-  return { id: u.id, name: u.name, email: u.email, role: u.role, status: u.status, patient_id: patient ? patient.id : null, therapist: u.role === "THERAPIST" ? therapistOut(u) : null };
+  return { id: u.id, name: u.name, email: u.email, role: u.role, status: u.status, patient_id: patient ? patient.id : null, therapist: u.role === "THERAPIST" ? therapistOut(u) : null, consent: u.role === "PATIENT" ? consentOut(u.id) : null };
 }
 function exInfo(key) {
   const ex = exById[key] || {};
@@ -98,7 +105,7 @@ const presOut = (pr) => {
 };
 function sessionOut(s, withReps) {
   const plan = db.plans.find((p) => p.id === s.plan_id);
-  const out = { ...s, ...exInfo(plan ? plan.exercise_type : "mini_squat"), high_pain: s.pain_score !== null && s.pain_score >= 7 };
+  const out = { ...s, ...exInfo(plan ? plan.exercise_type : "mini_squat"), side: plan ? plan.side : "BOTH", measured: s.mode === "TRACKED", high_pain: s.pain_score != null && s.pain_score >= 7 };
   if (!withReps) delete out.reps;
   return out;
 }
@@ -123,7 +130,8 @@ function patientSummary(p) {
     has_draft_plan: presOf(p.id).some((x) => x.status === "DRAFT"),
     active_plans: db.plans.filter((pl) => pl.patient_id === p.id && pl.active).map(planOut),
     sessions_count: ss.length, last_session_at: ss[0]?.ended_at || null, last_session: ss[0] ? sessionOut(ss[0]) : null,
-    badge: badge(ss), pain_alert: ss.slice(0, 5).some((s) => s.pain_score !== null && s.pain_score >= 7),
+    badge: badge(ss.filter((s) => s.adherence_pct != null)), pain_alert: ss.slice(0, 5).some((s) => s.pain_score != null && s.pain_score >= 7),
+    review_flags: ss.filter((s) => s.review_flag && Date.now() - new Date(s.ended_at) < 7 * 86400000).map((s) => ({ session_id: s.id, flag: s.review_flag, date: s.ended_at, exercise_name: sessionOut(s).exercise_name, note: s.patient_note })),
   };
 }
 const ownPatient = (t, id) => {
@@ -290,7 +298,7 @@ export const mock = {
   trend: async (id) => {
     await wait();
     const p = ownPatient(need("THERAPIST"), id);
-    return sessionsOf(p.id).reverse().map((s) => {
+    return sessionsOf(p.id).filter((s) => s.max_angle_reached != null).reverse().map((s) => {
       const plan = db.plans.find((x) => x.id === s.plan_id);
       return { session_id: s.id, ...exInfo(plan.exercise_type), date: new Date(s.ended_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }), max_angle: s.max_angle_reached, avg_peak_angle: s.avg_peak_angle, accuracy_pct: s.accuracy_pct, adherence_pct: s.adherence_pct, pain_score: s.pain_score, target_min: s.min_angle, target_max: s.max_angle };
     });
@@ -317,12 +325,91 @@ export const mock = {
   startSession: async () => {
     throw new MockError(400, "Mock mode cannot open the camera window. Switch VITE_API_MODE to live to run a real session.");
   },
-  setPain: async (id, pain) => {
+  setPain: async (id, pain, note) => {
     await wait();
     const s = db.sessions.find((x) => x.id === Number(id));
     if (!s) throw new MockError(404, "Session not found");
     s.pain_score = pain;
+    if (note) s.patient_note = note;
     return sessionOut(s);
+  },
+  consentText: async () => ({
+    version: CONSENT_VERSION,
+    review_note: "Draft wording - to be reviewed. (mock mode)",
+    sections: [
+      { title: "What ReHabRep does", text: "Counts repetitions and estimates joint angles, and shares results with your therapist. It does not diagnose." },
+      { title: "What we store", text: "Your plan, session numbers, pain scores and notes - encrypted." },
+      { title: "Camera", text: "Video is processed on this computer and not saved. You can say no and use guided mode." },
+      { title: "Who can see your data", text: "Your therapist and authorised administrators." },
+    ],
+  }),
+  safety: async () => ({ emergency_number: "112", red_flags: ["Chest pain or tightness", "Fainting or severe dizziness", "Sudden severe or worsening pain", "New numbness or weakness", "A fall or new injury"], stop_rule: "Stop if you feel sharp, worsening or unusual pain.", not_emergency: "ReHabRep is not an emergency service.", review_note: "Needs clinician review (mock mode)." }),
+  myConsent: async () => {
+    await wait();
+    const u = need("PATIENT");
+    return { ...consentOut(u.id), history: db.consents.filter((c) => c.user_id === u.id).slice().reverse() };
+  },
+  giveConsent: async (version, camera) => {
+    await wait();
+    const u = need("PATIENT");
+    if (version !== CONSENT_VERSION) throw new MockError(409, "The consent text has changed.");
+    db.consents.push({ user_id: u.id, version, action: camera ? "AGREED" : "AGREED_NO_CAMERA", camera_allowed: camera, created_at: now() });
+    return userOut(u);
+  },
+  setCamera: async (allow) => {
+    await wait();
+    const u = need("PATIENT");
+    db.consents.push({ user_id: u.id, version: CONSENT_VERSION, action: allow ? "CAMERA_ALLOWED" : "CAMERA_WITHDRAWN", camera_allowed: allow, created_at: now() });
+    return userOut(u);
+  },
+  today: async () => {
+    await wait();
+    const u = need("PATIENT");
+    const p = db.patients.find((x) => x.user_id === u.id);
+    const live = presOf(p.id).find((x) => x.status === "ACTIVE" || x.status === "PAUSED");
+    const todayStr = new Date().toDateString();
+    const items = [];
+    const other = [];
+    if (live && live.status === "ACTIVE") {
+      db.plans.filter((it) => it.prescription_id === live.id).forEach((it) => {
+        const todays = db.sessions.filter((s) => s.plan_id === it.id && new Date(s.ended_at).toDateString() === todayStr);
+        const st = todays.some((s) => s.status === "COMPLETED") ? "DONE" : todays.some((s) => ["PARTIAL", "INTERRUPTED"].includes(s.status)) ? "PARTIAL" : todays.some((s) => s.status === "SKIPPED") ? "SKIPPED" : "PENDING";
+        const out = { ...planOut(it), today_status: st, today_session_ids: todays.map((s) => s.id) };
+        (out.scheduled_today ? items : other).push(out);
+      });
+    }
+    const done = items.filter((i) => i.today_status === "DONE").length;
+    return {
+      date: new Date().toISOString().slice(0, 10), weekday: new Date().toLocaleDateString("en-IN", { weekday: "long" }),
+      plan_status: live ? live.status : null, plan_status_reason: live ? live.status_reason : null, plan_note: live ? live.note : null, plan_version: live ? live.version : null,
+      items, other_items: other, all_done_today: items.length > 0 && done === items.length,
+      streak: { days: items.length > 0 && done === items.length ? 1 : 0, rule: "A day counts when every exercise scheduled for that day is completed. (mock mode: today only)" },
+      adherence_7d: done ? { pct: Math.round((100 * done) / items.length), done, scheduled: items.length, days_with_missed: 0 } : null,
+      adherence_rule: "Scheduled exercises completed in the last 7 days, divided by exercises scheduled.",
+      consent: consentOut(u.id),
+    };
+  },
+  guidedSession: async (data) => {
+    await wait();
+    const u = need("PATIENT");
+    const p = db.patients.find((x) => x.user_id === u.id);
+    const dup = db.sessions.find((s) => s.client_request_id === data.client_request_id);
+    if (dup) return sessionOut(dup);
+    const it = db.plans.find((x) => x.id === Number(data.plan_id) && x.patient_id === p.id && x.active);
+    if (!it) throw new MockError(404, "This exercise is not in your active plan");
+    const sets = Math.min(data.sets_done, it.sets);
+    const status = sets >= it.sets ? "COMPLETED" : data.stopped ? "INTERRUPTED" : sets > 0 ? "PARTIAL" : "INTERRUPTED";
+    const s = { id: db.nextId++, client_request_id: data.client_request_id, patient_id: p.id, plan_id: it.id, mode: "GUIDED", status, review_flag: data.pain_stop ? "PAIN_STOP" : null, patient_note: null, started_at: now(), ended_at: now(), min_angle: it.min_angle, max_angle: it.max_angle, prescribed_reps: it.sets * it.reps_per_set, reps_done: sets * it.reps_per_set, good_reps: null, under_reps: null, over_reps: null, accuracy_pct: null, completion_pct: null, adherence_pct: null, max_angle_reached: null, avg_peak_angle: null, duration_s: data.duration_s, plan_followed: null, pain_score: null, reps: [] };
+    db.sessions.push(s);
+    return sessionOut(s);
+  },
+  skipToday: async (data) => {
+    await wait();
+    const u = need("PATIENT");
+    const p = db.patients.find((x) => x.user_id === u.id);
+    const items = db.plans.filter((x) => x.patient_id === p.id && x.active && (data.plan_id ? x.id === Number(data.plan_id) : planOut(x).scheduled_today));
+    items.forEach((it) => db.sessions.push({ id: db.nextId++, patient_id: p.id, plan_id: it.id, mode: "NONE", status: "SKIPPED", review_flag: data.not_well ? "NOT_WELL" : null, patient_note: data.reason, started_at: now(), ended_at: now(), min_angle: it.min_angle, max_angle: it.max_angle, prescribed_reps: it.sets * it.reps_per_set, reps_done: 0, good_reps: null, adherence_pct: null, max_angle_reached: null, plan_followed: null, pain_score: null, reps: [] }));
+    return { skipped: items.length };
   },
 
   // ---------------- admin ----------------

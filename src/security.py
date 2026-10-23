@@ -27,7 +27,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session as DbSession
 
+from clock import iso_utc
 from crypto import KEY_DIR
+from crud import latest_consent
 from database import get_db
 from models import User
 
@@ -141,15 +143,20 @@ def therapist_status_out(profile) -> Optional[dict]:
         "registration_number": profile.registration_number,
         "issuing_body": profile.issuing_body,
         "decision_reason": profile.decision_reason,
-        "reviewed_at": profile.reviewed_at.isoformat() if profile.reviewed_at else None,
-        "submitted_at": profile.submitted_at.isoformat() if profile.submitted_at else None,
+        "reviewed_at": iso_utc(profile.reviewed_at),
+        "submitted_at": iso_utc(profile.submitted_at),
         "has_document": bool(profile.document_file),
         "document_name": profile.document_name,
     }
 
 
-def user_out(user: User) -> dict:
+def user_out(user: User, db: DbSession = None) -> dict:
     """What the frontend needs to know about the logged-in user."""
+    consent = None
+    if user.role == "PATIENT" and db is not None:
+        from serializers import consent_out  # local import: serializers imports crud, avoid a cycle at load
+
+        consent = consent_out(latest_consent(db, user.id))
     return {
         "id": user.id,
         "name": user.name,
@@ -158,4 +165,5 @@ def user_out(user: User) -> dict:
         "status": user.status,
         "patient_id": user.patient_profile.id if user.patient_profile else None,
         "therapist": therapist_status_out(user.therapist_profile) if user.role == "THERAPIST" else None,
+        "consent": consent,  # patients only: {given, camera_allowed, needs_consent, ...}
     }

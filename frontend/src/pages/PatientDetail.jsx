@@ -15,8 +15,10 @@ import {
   AccountBadge,
   AdherenceBadge,
   FollowedBadge,
+  ModeBadge,
   PainBadge,
   PlanStatusBadge,
+  SessionStatusBadge,
 } from "../components/Badge.jsx";
 import InviteLinkBox from "../components/InviteLinkBox.jsx";
 import ReasonDialog from "../components/ReasonDialog.jsx";
@@ -28,6 +30,7 @@ const TABS = [
   ["progress", "Progress"],
 ];
 const SIDE_LABEL = { LEFT: "Left", RIGHT: "Right", BOTH: "Both sides" };
+const FLAG_LABEL = { NOT_WELL: "Not well - skipped", PAIN_STOP: "Stopped because of pain" };
 
 function PlanItems({ items }) {
   return items.map((p) => (
@@ -202,6 +205,19 @@ export default function PatientDetail() {
       {/* ================= OVERVIEW ================= */}
       {tab === "overview" && (
         <>
+          {patient.review_flags && patient.review_flags.length > 0 && (
+            <div className="alert alert-amber">
+              <b>Please review (last 7 days):</b>
+              <ul className="plain-list">
+                {patient.review_flags.map((f) => (
+                  <li key={f.session_id}>
+                    {fmtDate(f.date)} · {f.exercise_name} · {FLAG_LABEL[f.flag] || f.flag}
+                    {f.note ? ` - "${f.note}"` : ""} · <Link to={`/sessions/${f.session_id}`}>open</Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {notActivated && (
             <div className="alert alert-amber">
               <b>{patient.account_status === "DRAFT" ? "Not invited yet." : "Invitation sent - not accepted yet."}</b>{" "}
@@ -400,12 +416,12 @@ export default function PatientDetail() {
             )}
           </div>
           {chartData.length === 0 ? (
-            <p className="muted">No sessions yet.</p>
+            <p className="muted">No camera-measured sessions yet.</p>
           ) : (
             <>
               <p className="muted small">
                 {chartData[0].exercise_name}. Green band = range prescribed in the latest session ({lastTarget.target_min}° –{" "}
-                {lastTarget.target_max}°).
+                {lastTarget.target_max}°). Only camera-measured sessions are charted.
               </p>
               <div className="chart">
                 <ResponsiveContainer width="100%" height={260}>
@@ -464,8 +480,9 @@ export default function PatientDetail() {
                 <tr>
                   <th>Date</th>
                   <th>Exercise</th>
+                  <th>Status</th>
                   <th>Reps done</th>
-                  <th>Correct</th>
+                  <th>In range</th>
                   <th>Under / Over</th>
                   <th>Best angle</th>
                   <th>Pain</th>
@@ -475,30 +492,38 @@ export default function PatientDetail() {
               </thead>
               <tbody>
                 {sessions.map((s) => (
-                  <tr key={s.id} className={s.high_pain ? "row-alert" : ""}>
+                  <tr key={s.id} className={s.high_pain || s.review_flag ? "row-alert" : ""}>
                     <td>{fmtDate(s.ended_at)}</td>
                     <td>
                       <div>{s.exercise_name}</div>
                       <div className="muted small">
                         {s.min_angle}° – {s.max_angle}°
                       </div>
+                      <ModeBadge mode={s.mode} />
                     </td>
                     <td>
-                      {s.reps_done}/{s.prescribed_reps}
+                      <SessionStatusBadge status={s.status} />
+                      {s.review_flag && <div className="small bad">{FLAG_LABEL[s.review_flag]}</div>}
                     </td>
                     <td>
-                      {s.good_reps} <span className="muted small">({fmtNum(s.accuracy_pct)}%)</span>
+                      {s.status === "SKIPPED" ? "-" : `${s.reps_done}/${s.prescribed_reps}`}
+                      {s.mode === "GUIDED" && <div className="muted small">patient-confirmed</div>}
                     </td>
                     <td>
-                      {s.under_reps} / {s.over_reps}
+                      {s.measured ? (
+                        <>
+                          {s.good_reps} <span className="muted small">({fmtNum(s.accuracy_pct)}%)</span>
+                        </>
+                      ) : (
+                        <span className="muted">Unavailable</span>
+                      )}
                     </td>
-                    <td>{fmtNum(s.max_angle_reached, 1)}°</td>
+                    <td>{s.measured ? `${s.under_reps} / ${s.over_reps}` : <span className="muted">-</span>}</td>
+                    <td>{s.max_angle_reached != null ? `${fmtNum(s.max_angle_reached, 1)}°` : <span className="muted">-</span>}</td>
                     <td>
                       <PainBadge score={s.pain_score} />
                     </td>
-                    <td>
-                      <FollowedBadge value={s.plan_followed} />
-                    </td>
+                    <td>{s.measured ? <FollowedBadge value={s.plan_followed} /> : <span className="muted">-</span>}</td>
                     <td className="right">
                       <Link className="btn btn-outline btn-sm" to={`/sessions/${s.id}`}>
                         Report
