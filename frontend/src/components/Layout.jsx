@@ -46,7 +46,6 @@ export default function Layout({ user, children }) {
   const [open, setOpen] = useState(false); // mobile sidebar
   const [pending, setPending] = useState(0); // admin: therapists waiting for verification
   const links = navFor(user);
-  const dark = user.role !== "PATIENT";
 
   useEffect(() => setOpen(false), [location.pathname]);
 
@@ -64,7 +63,7 @@ export default function Layout({ user, children }) {
   }
 
   return (
-    <div className={`shell ${dark ? "shell-dark" : "shell-light"}`}>
+    <div className="shell shell-dark">
       {isMock && (
         <div className="mock-banner">
           DEMO DATA - mock mode, nothing is saved. Set VITE_API_MODE=live to use the real backend.
@@ -73,7 +72,7 @@ export default function Layout({ user, children }) {
       <aside className={`sidebar ${open ? "open" : ""}`}>
         <div className="sidebar-head">
           <Link to={homeFor(user)} className="sidebar-brand">
-            <Logo light={dark} />
+            <Logo light />
           </Link>
           <button className="icon-btn sidebar-close" onClick={() => setOpen(false)} aria-label="Close menu">
             <Icon name="x" />
