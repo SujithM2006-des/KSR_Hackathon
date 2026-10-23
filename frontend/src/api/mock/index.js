@@ -18,9 +18,9 @@ class MockError extends Error {
 }
 
 const EXERCISES = [
-  { key: "mini_squat", name: "Mini squat / sit-to-stand", joint: "Knee", measure: "Knee flexion", direction: "up", view: "side", default_min: 60, default_max: 100, instructions: "Stand side-on to the camera. Bend your knees, then stand up." },
+  { key: "mini_squat", name: "Mini squat / sit-to-stand", joint: "Knee", measure: "Knee flexion", direction: "up", view: "side", default_min: 90, default_max: 145, instructions: "Stand side-on to the camera. Bend your knees, then stand up." },
   { key: "seated_knee_extension", name: "Seated knee extension (long arc quad)", joint: "Knee", measure: "Knee flexion (0 = fully straight)", direction: "down", view: "side", default_min: 0, default_max: 15, instructions: "Sit side-on to the camera. Straighten your knee fully, then lower it slowly." },
-  { key: "shoulder_flexion", name: "Shoulder flexion (arm raise forward)", joint: "Shoulder", measure: "Shoulder elevation", direction: "up", view: "side", default_min: 90, default_max: 150, instructions: "Stand side-on. Raise your straight arm forward and up, then lower." },
+  { key: "shoulder_flexion", name: "Shoulder flexion (arm raise forward)", joint: "Shoulder", measure: "Shoulder elevation", direction: "up", view: "side", default_min: 150, default_max: 180, instructions: "Stand side-on. Raise your straight arm forward and up, then lower." },
 ];
 const exById = Object.fromEntries(EXERCISES.map((e) => [e.key, e]));
 
@@ -37,7 +37,7 @@ const db = {
   },
   patients: [{ id: 1, user_id: 4, therapist_id: 2, surgery_type: "Knee replacement (left)", notes: null }],
   prescriptions: [{ id: 1, patient_id: 1, created_by: 2, version: 1, status: "ACTIVE", note: null, status_reason: null, previous_id: null, created_at: daysAgo(5), activated_at: daysAgo(5), ended_at: null }],
-  plans: [{ id: 1, patient_id: 1, prescription_id: 1, exercise_type: "mini_squat", condition: "Knee replacement (left)", sets: 1, reps_per_set: 8, hold_s: 0, rest_s: 30, side: "BOTH", min_angle: 90, max_angle: 135, days: [0, 1, 2, 3, 4, 5, 6], time_of_day: null, note: null, active: true, created_at: daysAgo(5) }],
+  plans: [{ id: 1, patient_id: 1, prescription_id: 1, exercise_type: "mini_squat", condition: "Knee replacement (left)", sets: 1, reps_per_set: 8, hold_s: 0, rest_s: 30, side: "BOTH", min_angle: 90, max_angle: 145, days: [0, 1, 2, 3, 4, 5, 6], time_of_day: null, note: null, active: true, created_at: daysAgo(5) }],
   invites: {}, // token -> { user_id, used, revoked, expires_at }
   consents: [], // { user_id, version, action, camera_allowed, created_at }
   sessions: [],
@@ -322,6 +322,10 @@ export const mock = {
     const p = db.patients.find((x) => x.user_id === need("PATIENT").id);
     return sessionsOf(p.id).map((s) => sessionOut(s));
   },
+  sessionInput: async () => {
+    await wait();
+    return { mode: "video", video: null, available: false };
+  },
   startSession: async () => {
     throw new MockError(400, "Mock mode cannot open the camera window. Switch VITE_API_MODE to live to run a real session.");
   },
@@ -343,7 +347,9 @@ export const mock = {
       { title: "Who can see your data", text: "Your therapist and authorised administrators." },
     ],
   }),
-  safety: async () => ({ emergency_number: "112", red_flags: ["Chest pain or tightness", "Fainting or severe dizziness", "Sudden severe or worsening pain", "New numbness or weakness", "A fall or new injury"], stop_rule: "Stop if you feel sharp, worsening or unusual pain.", not_emergency: "ReHabRep is not an emergency service.", review_note: "Needs clinician review (mock mode)." }),
+  emergencyAlertInfo: async () => ({ configured: false, to: null }),
+  emergencyAlert: async () => ({ configured: false }),
+  safety: async () => ({ emergency_number: "108", red_flags: ["Chest pain or tightness", "Fainting or severe dizziness", "Sudden severe or worsening pain", "New numbness or weakness", "A fall or new injury"], stop_rule: "Stop if you feel sharp, worsening or unusual pain.", not_emergency: "ReHabRep is not an emergency service.", review_note: "Needs clinician review (mock mode)." }),
   myConsent: async () => {
     await wait();
     const u = need("PATIENT");
@@ -445,6 +451,15 @@ export const mock = {
     await wait();
     need("ADMIN");
     return db.users.filter((u) => u.role === "THERAPIST").map((t) => ({ therapist: { id: t.id, name: t.name, email: t.email, verification_status: db.profiles[t.id]?.status, account_status: t.status }, patients: db.patients.filter((p) => p.therapist_id === t.id).map(patientSummary) }));
+  },
+  adminClearSessions: async (patientId, reason) => {
+    await wait();
+    const a = need("ADMIN");
+    const before = db.sessions.length;
+    db.sessions = db.sessions.filter((s) => s.patient_id !== Number(patientId));
+    const deleted = before - db.sessions.length;
+    log(a.id, "SESSIONS_CLEARED", "PATIENT", Number(patientId), `${deleted} session(s): ${reason}`);
+    return { patient_id: Number(patientId), deleted };
   },
   adminSetStatus: async (id, suspend, reason) => {
     await wait();

@@ -1,53 +1,119 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, fmtDate, getUser, newRequestId } from "../api.js";
-import { FollowedBadge, ModeBadge, PainBadge, SessionStatusBadge } from "../components/Badge.jsx";
+import { CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { api, fmtDate, getUser } from "../api.js";
+import { SessionStatusBadge } from "../components/Badge.jsx";
+import { Donut, JOINT_TONE, Kpi, Panel, PanelLink, PIE } from "../components/Dash.jsx";
+import { Icon, IconTile } from "../components/Icons.jsx";
+import SkipDialog from "../components/SkipDialog.jsx";
+import { SessionsTable } from "./PatientSessions.jsx";
+import EmergencyCall from "../components/EmergencyCall.jsx";
 
-const SIDE = { LEFT: "Left side", RIGHT: "Right side", BOTH: "Both sides" };
+const DAY = 24 * 3600 * 1000;
+const PAIN_WORD = (p) => (p >= 7 ? "Severe" : p >= 4 ? "Moderate" : p >= 1 ? "Mild" : "No pain");
 
-function ExerciseCard({ p, onStart, onSkip, disabled }) {
+function ExerciseRow({ p, onStart, onSkip, disabled }) {
   const done = p.today_status === "DONE";
   return (
-    <div className={`card plan-card ${done ? "is-done" : ""}`}>
-      <div className="plan-card-top">
-        <span className="joint-chip">{p.joint}</span>
-        {p.today_status ? <SessionStatusBadge status={p.today_status} /> : <span className="muted small">{p.days_label}</span>}
-      </div>
-      <h2>{p.exercise_name}</h2>
-      <div className="plan-facts">
-        <div>
-          <span className="big">
-            {p.sets} × {p.reps_per_set}
+    <div className="ex-row">
+      <span className={`ex-thumb tone-${JOINT_TONE[p.joint] || "violet"}`}>
+        <Icon name="activity" size={28} />
+      </span>
+      <div>
+        <h4>{p.exercise_name}</h4>
+        <div className="ex-meta">
+          <span className="badge badge-violet">{p.joint}</span>
+          <span>
+            <b>
+              {p.sets} × {p.reps_per_set}
+            </b>{" "}
+            reps
           </span>
-          <span className="muted small">sets × reps</span>
-        </div>
-        <div>
-          <span className="big">
-            {p.min_angle}° – {p.max_angle}°
+          <span>
+            Target {p.min_angle}° – {p.max_angle}°
           </span>
-          <span className="muted small">target range (approx.)</span>
+          {p.rest_s ? (
+            <span>
+              <Icon name="history" size={15} /> Rest {p.rest_s}s
+            </span>
+          ) : null}
         </div>
       </div>
-      <p className="muted small">
-        {SIDE[p.side] || p.side}
-        {p.hold_s ? ` · hold ${p.hold_s}s` : ""}
-        {p.rest_s ? ` · rest ${p.rest_s}s between sets` : ""}
-        {p.time_of_day ? ` · best at ${p.time_of_day}` : ""} · {p.view === "side" ? "side-on to camera" : "facing the camera"}
-      </p>
-      <p className="instructions">{p.instructions}</p>
-      {p.note && <div className="alert alert-grey small">From your therapist: {p.note}</div>}
-      <p className="muted small">Instructions need clinician review before real use.</p>
-      <div className="row-gap">
-        <button className="btn btn-primary btn-lg grow" disabled={disabled} onClick={() => onStart(p)}>
-          {done ? "Do it again" : "Start"}
+      <div className="ex-actions">
+        <SessionStatusBadge status={p.today_status} />
+        <button className="btn btn-primary" disabled={disabled} onClick={() => onStart(p)}>
+          <Icon name="play" size={16} /> {done ? "Do it again" : "Start session"}
         </button>
-        {onSkip && !done && (
-          <button className="btn btn-ghost" disabled={disabled} onClick={() => onSkip(p)}>
+        {!done && onSkip && (
+          <button className="btn btn-ghost btn-sm" disabled={disabled} onClick={() => onSkip(p)}>
             Skip today
           </button>
         )}
       </div>
     </div>
+  );
+}
+
+// Best angle of each camera-measured session for one exercise, with the prescribed band
+function ProgressChart({ sessions }) {
+  const measured = sessions.filter((s) => s.measured && s.max_angle_reached != null);
+  const exercises = useMemo(() => {
+    const m = new Map();
+    measured.forEach((s) => m.set(s.exercise_type, s.exercise_name));
+    return [...m.entries()];
+  }, [sessions]);
+  const [key, setKey] = useState(exercises[0] ? exercises[0][0] : "");
+  const active = exercises.some(([k]) => k === key) ? key : exercises[0] ? exercises[0][0] : "";
+  const rows = measured
+    .filter((s) => s.exercise_type === active)
+    .slice()
+    .reverse()
+    .map((s) => ({
+      date: new Date(s.ended_at).toLocaleDateString(undefined, { day: "numeric", month: "short" }),
+      angle: Math.round(s.max_angle_reached),
+      min: s.min_angle,
+      max: s.max_angle,
+    }));
+  const last = rows[rows.length - 1];
+
+  return (
+    <Panel
+      title="Recovery Progress"
+      icon="trend"
+      action={
+        exercises.length > 0 && (
+          <select value={active} onChange={(e) => setKey(e.target.value)} aria-label="Exercise">
+            {exercises.map(([k, n]) => (
+              <option key={k} value={k}>
+                {n}
+              </option>
+            ))}
+          </select>
+        )
+      }
+    >
+      {rows.length === 0 ? (
+        <p className="empty">Your progress chart appears after your first session with the camera.</p>
+      ) : (
+        <>
+          <div style={{ height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={rows} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
+                <CartesianGrid stroke="#eef0f7" vertical={false} />
+                <ReferenceArea y1={last.min} y2={last.max} fill="#5b34ea" fillOpacity={0.08} />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#5d6585" }} />
+                <YAxis domain={[0, 180]} tick={{ fontSize: 11, fill: "#5d6585" }} unit="°" />
+                <Tooltip formatter={(v) => [`${v}°`, "Best angle"]} />
+                <Line type="monotone" dataKey="angle" stroke="#2563eb" strokeWidth={2.5} dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="muted small" style={{ margin: "8px 0 0" }}>
+            Latest: <b>{last.angle}°</b> · target {last.min}° – {last.max}° (shaded). Angles are camera estimates.
+          </p>
+        </>
+      )}
+    </Panel>
   );
 }
 
@@ -57,8 +123,7 @@ export default function PatientHome() {
   const [today, setToday] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [error, setError] = useState("");
-  const [skip, setSkip] = useState(null); // { item | null(all), reason, notWell }
-  const [busy, setBusy] = useState(false);
+  const [skip, setSkip] = useState(null); // { item } - item null = all of today
 
   async function load() {
     try {
@@ -75,64 +140,72 @@ export default function PatientHome() {
     load();
   }, []);
 
-  async function submitSkip(e) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await api.skipToday({
-        plan_id: skip.item ? skip.item.id : null,
-        reason: skip.reason.trim() || null,
-        not_well: skip.notWell,
-        client_request_id: newRequestId(),
-      });
-      setSkip(null);
-      load();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  if (error && !today) return <div className="alert alert-red">{error}</div>;
+  if (!today) return <p className="muted">Loading...</p>;
 
   const start = (p) => navigate(`/patient/session/${p.id}`);
-  const paused = today && today.plan_status === "PAUSED";
-  const ended = today && (!today.plan_status || today.plan_status === "ENDED");
-  const left = today ? today.items.filter((i) => i.today_status !== "DONE").length : 0;
-  const adh = today && today.adherence_7d;
+  const paused = today.plan_status === "PAUSED";
+  const ended = !today.plan_status || today.plan_status === "ENDED";
+  const left = today.items.filter((i) => i.today_status !== "DONE").length;
+  const adh = today.adherence_7d;
+  const lastPain = sessions.find((s) => s.pain_score != null);
+  const now = new Date();
+  const monthDone = sessions.filter((s) => {
+    const d = new Date(s.ended_at);
+    return s.status === "COMPLETED" && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  }).length;
+  const week = sessions.filter((s) => Date.now() - new Date(s.ended_at).getTime() < 7 * DAY);
+  const wk = {
+    done: week.filter((s) => s.status === "COMPLETED").length,
+    partly: week.filter((s) => s.status === "PARTIAL" || s.status === "INTERRUPTED").length,
+    skipped: week.filter((s) => s.status === "SKIPPED").length,
+  };
+  const notes = [
+    ...(today.plan_note ? [{ key: "plan", title: "About your plan", text: today.plan_note }] : []),
+    ...[...today.items, ...today.other_items]
+      .filter((i) => i.note)
+      .map((i) => ({ key: i.id, title: i.exercise_name, text: i.note })),
+  ];
 
   return (
     <div>
-      <div className="page-head">
+      <div className="dash-head">
         <div>
           <h1>Hello, {user.name.split(" ")[0]}</h1>
-          <p className="muted">
-            {today ? `${today.weekday} - ` : ""}here is what your therapist planned for today.
-          </p>
+          <p>Your recovery dashboard. Follow your clinician-prescribed plan, one rep at a time.</p>
         </div>
         <Link to="/safety" className="btn btn-outline">
-          Safety and help
+          <Icon name="heart" size={18} /> Safety and help
         </Link>
       </div>
 
       {error && <div className="alert alert-red">{error}</div>}
 
-      {today && (
-        <div className="stats">
-          <div className="stat">
-            <span className="stat-num">{today.items.length ? `${today.items.length - left}/${today.items.length}` : "-"}</span>
-            <span className="stat-label">Done today</span>
-          </div>
-          <div className="stat" title={today.streak.rule}>
-            <span className="stat-num ok">{today.streak.days}</span>
-            <span className="stat-label">Day streak</span>
-          </div>
-          <div className="stat" title={today.adherence_rule}>
-            <span className="stat-num">{adh ? `${adh.pct}%` : "Unavailable"}</span>
-            <span className="stat-label">Last 7 days {adh ? `(${adh.done}/${adh.scheduled})` : ""}</span>
-          </div>
-        </div>
-      )}
-      {today && <p className="muted small rule-note">How these are counted: {today.streak.rule}</p>}
+      <div className="kpis">
+        <Kpi
+          icon="clipboard"
+          label="Today's Plan"
+          value={today.items.length ? `${today.items.length - left}/${today.items.length}` : "-"}
+          sub={today.items.length ? "exercises done today" : "nothing scheduled today"}
+          to="/patient/plan"
+        />
+        <Kpi
+          icon="target"
+          tone="teal"
+          label="Weekly Adherence"
+          value={adh ? `${adh.pct}%` : "-"}
+          sub={adh ? `${adh.done}/${adh.scheduled} done · streak ${today.streak.days} day${today.streak.days === 1 ? "" : "s"}` : "shows after your first full day"}
+        />
+        <Kpi
+          icon="heart"
+          tone="red"
+          label="Last Pain Check-in"
+          value={lastPain ? `${lastPain.pain_score}/10` : "-"}
+          sub={lastPain ? PAIN_WORD(lastPain.pain_score) : "no check-in yet"}
+          valueClass={lastPain && lastPain.pain_score >= 7 ? "bad" : ""}
+        />
+        <Kpi icon="activity" tone="blue" label="Sessions Completed" value={monthDone} sub="this month" to="/patient/sessions" />
+      </div>
 
       {paused && (
         <div className="alert alert-amber">
@@ -140,132 +213,96 @@ export default function PatientHome() {
           Please wait until they resume it, and contact them if you have questions.
         </div>
       )}
-      {today && ended && !paused && (
-        <div className="card">
-          <p className="muted">You have no active exercise plan right now. Your therapist will add one.</p>
+      {today.all_done_today && <div className="alert alert-green">All done for today. Well done!</div>}
+
+      <div className="dash-grid">
+        <Panel
+          className="span-7"
+          title="Today's Prescribed Exercises"
+          icon="calendar"
+          action={
+            <span className="dash-actions">
+              {left > 0 && !paused && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setSkip({ item: null })}>
+                  I can't exercise today
+                </button>
+              )}
+              <PanelLink to="/patient/plan">View full plan</PanelLink>
+            </span>
+          }
+        >
+          {ended && !paused ? (
+            <p className="empty">You have no active exercise plan right now. Your therapist will add one.</p>
+          ) : today.items.length === 0 ? (
+            <p className="empty">Nothing is scheduled for today. Rest well.</p>
+          ) : (
+            today.items.map((p) => (
+              <ExerciseRow key={p.id} p={p} onStart={start} disabled={paused} onSkip={(item) => setSkip({ item })} />
+            ))
+          )}
+        </Panel>
+
+        <div className="span-5">
+          <ProgressChart sessions={sessions} />
         </div>
-      )}
-      {today && today.plan_note && !paused && <div className="alert alert-grey">From your therapist: {today.plan_note}</div>}
 
-      {today === null && !error && <p className="muted">Loading...</p>}
+        <Panel className="span-4" title="Last 7 Days" icon="target">
+          <Donut
+            parts={[
+              { label: "Completed", value: wk.done, color: PIE.green },
+              { label: "Partly done", value: wk.partly, color: PIE.amber },
+              { label: "Skipped", value: wk.skipped, color: PIE.grey },
+            ]}
+            center={adh ? `${adh.pct}%` : week.length}
+            centerLabel={adh ? "adherence" : "sessions"}
+          />
+        </Panel>
 
-      {today && today.items.length > 0 && (
-        <>
-          <div className="section-head">
-            <h2>Today</h2>
-            {left > 0 && (
-              <button className="btn btn-ghost btn-sm" onClick={() => setSkip({ item: null, reason: "", notWell: false })}>
-                I can't exercise today
-              </button>
-            )}
+        <Panel className="span-4" title="Your Clinician's Notes" icon="note">
+          {notes.length === 0 ? (
+            <p className="empty">No notes from your clinician right now.</p>
+          ) : (
+            notes.map((n) => (
+              <div className="note-card" key={n.key}>
+                <IconTile name="stethoscope" tone="violet" size={18} />
+                <div>
+                  <b>{n.title}</b>
+                  <p>{n.text}</p>
+                </div>
+              </div>
+            ))
+          )}
+        </Panel>
+
+        <Panel className="span-4" title="Safety First" icon="shield">
+          <p style={{ marginTop: 0 }}>
+            <b>Stop if you feel sharp, worsening or unusual pain</b>, then tell your clinician. After each session you can
+            record your pain from 0 to 10.
+          </p>
+          <div className="emergency">
+            <span>Emergency</span>
+            <EmergencyCall />
           </div>
-          {today.all_done_today && <div className="alert alert-green">All done for today. Well done!</div>}
-          <div className="plan-cards">
-            {today.items.map((p) => (
-              <ExerciseCard key={p.id} p={p} onStart={start} onSkip={(item) => setSkip({ item, reason: "", notWell: false })} />
-            ))}
-          </div>
-        </>
-      )}
-      {today && !paused && today.plan_status === "ACTIVE" && today.items.length === 0 && (
-        <div className="card">
-          <p className="muted">Nothing is scheduled for today. Rest well.</p>
-        </div>
-      )}
+        </Panel>
 
-      {today && today.other_items.length > 0 && (
-        <details className="card other-days">
-          <summary>Also in your plan on other days ({today.other_items.length})</summary>
-          <div className="plan-cards">
-            {today.other_items.map((p) => (
-              <ExerciseCard key={p.id} p={{ ...p, today_status: null }} onStart={start} />
-            ))}
-          </div>
-        </details>
-      )}
-
-      {/* ---------- history ---------- */}
-      <div className="card table-card">
-        <h3 className="pad-x">My sessions</h3>
-        {sessions.length === 0 ? (
-          <p className="muted pad">No sessions yet.</p>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Exercise</th>
-                <th>Status</th>
-                <th>Reps</th>
-                <th>Pain</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((s) => (
-                <tr key={s.id}>
-                  <td>{fmtDate(s.ended_at)}</td>
-                  <td>
-                    <div>{s.exercise_name}</div>
-                    <ModeBadge mode={s.mode} />
-                  </td>
-                  <td>
-                    <SessionStatusBadge status={s.status} />
-                  </td>
-                  <td>
-                    {s.status === "SKIPPED" ? (
-                      <span className="muted">-</span>
-                    ) : s.measured ? (
-                      <>
-                        {s.good_reps}/{s.prescribed_reps} in range <FollowedBadge value={s.plan_followed} />
-                      </>
-                    ) : (
-                      `${s.reps_done}/${s.prescribed_reps} (you confirmed)`
-                    )}
-                  </td>
-                  <td>
-                    <PainBadge score={s.pain_score} />
-                  </td>
-                  <td className="right">
-                    <Link className="btn btn-outline btn-sm" to={`/sessions/${s.id}`}>
-                      Report
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <Panel className="span-12" flush title="Recent Sessions" icon="history" action={<PanelLink to="/patient/sessions" />}>
+          {sessions.length === 0 ? (
+            <p className="empty">No sessions yet. Press "Start session" above to begin.</p>
+          ) : (
+            <SessionsTable sessions={sessions.slice(0, 5)} />
+          )}
+        </Panel>
       </div>
 
       {skip && (
-        <div className="modal-backdrop" onClick={() => setSkip(null)}>
-          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submitSkip}>
-            <h3>{skip.item ? `Skip ${skip.item.exercise_name} today?` : "Skip today's exercises?"}</h3>
-            <p className="muted">Your therapist will see this. A short reason helps them.</p>
-            <label className="check-row">
-              <input type="checkbox" checked={skip.notWell} onChange={(e) => setSkip({ ...skip, notWell: e.target.checked })} />
-              <span>I'm not feeling well today</span>
-            </label>
-            <label>
-              Reason (optional)
-              <textarea rows={2} maxLength={300} value={skip.reason} onChange={(e) => setSkip({ ...skip, reason: e.target.value })} />
-            </label>
-            {skip.notWell && (
-              <div className="alert alert-amber small">
-                If you have chest pain, fainting, sudden severe pain or a fall, stop and call 112 or see a doctor.
-              </div>
-            )}
-            <div className="row-gap right">
-              <button type="button" className="btn btn-ghost" onClick={() => setSkip(null)}>
-                Cancel
-              </button>
-              <button className="btn btn-primary" disabled={busy}>
-                {busy ? "Saving..." : "Skip and tell my therapist"}
-              </button>
-            </div>
-          </form>
-        </div>
+        <SkipDialog
+          item={skip.item}
+          onClose={() => setSkip(null)}
+          onDone={() => {
+            setSkip(null);
+            load();
+          }}
+        />
       )}
     </div>
   );

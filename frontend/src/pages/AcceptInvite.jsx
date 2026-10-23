@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fmtDate, homeFor, saveLogin } from "../api.js";
+import { Logo } from "../components/Icons.jsx";
 
 // Public page opened from the therapist's invitation link: the patient chooses their own password.
 export default function AcceptInvite() {
@@ -41,11 +42,8 @@ export default function AcceptInvite() {
   return (
     <div className="register-page">
       <div className="card register-card narrow-card">
-        <div className="brand">
-          <span className="brand-mark">R</span>
-          <span>
-            ReHab<b>Rep</b>
-          </span>
+        <div className="card-logo">
+          <Logo />
         </div>
 
         {problem ? (

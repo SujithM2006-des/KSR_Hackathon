@@ -426,9 +426,9 @@ export default function PatientDetail() {
               <div className="chart">
                 <ResponsiveContainer width="100%" height={260}>
                   <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                    <CartesianGrid stroke="#e8edf0" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fontSize: 12, fill: "#5b6b75" }} />
-                    <YAxis domain={[0, 180]} tick={{ fontSize: 12, fill: "#5b6b75" }} unit="°" />
+                    <CartesianGrid stroke="#eef0f7" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 12, fill: "#5d6585" }} />
+                    <YAxis domain={[0, 180]} tick={{ fontSize: 12, fill: "#5d6585" }} unit="°" />
                     <ReferenceArea
                       y1={lastTarget.target_min}
                       y2={lastTarget.target_max}
@@ -445,7 +445,7 @@ export default function PatientDetail() {
                       type="monotone"
                       dataKey="max_angle"
                       name="Best angle"
-                      stroke="#0f766e"
+                      stroke="#5b34ea"
                       strokeWidth={2.5}
                       dot={{ r: 4 }}
                       isAnimationActive={false}
@@ -523,7 +523,7 @@ export default function PatientDetail() {
                     <td>
                       <PainBadge score={s.pain_score} />
                     </td>
-                    <td>{s.measured ? <FollowedBadge value={s.plan_followed} /> : <span className="muted">-</span>}</td>
+                    <td>{s.measured ? <FollowedBadge value={s.plan_followed} short /> : <span className="muted">-</span>}</td>
                     <td className="right">
                       <Link className="btn btn-outline btn-sm" to={`/sessions/${s.id}`}>
                         Report

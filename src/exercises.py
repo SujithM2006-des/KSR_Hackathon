@@ -12,6 +12,10 @@ Every exercise is defined by:
   view       how the camera should see the patient ("side" or "front")
   pick       "visible" -> use the side whose 3 keypoints are most confident
              "max"     -> use the side with the bigger movement (one limb moves, e.g. marching)
+  vertical_a True -> if keypoint A is out of view (e.g. hips cropped off), use a point straight
+             below B instead (patient standing upright, so the trunk is roughly vertical)
+  anatomical_max  optional cap on the reading: a joint can't bend further than this, so a
+             bigger number is a camera-angle error (limb pointing at the camera)
   default_min / default_max   suggested range (the THERAPIST always sets the real one)
 
 Adding an exercise = adding one entry here. No other code changes needed.
@@ -46,8 +50,8 @@ EXERCISES = {
         "rest_angle": 15,
         "view": "side",
         "pick": "visible",
-        "default_min": 60,
-        "default_max": 100,
+        "default_min": 90,
+        "default_max": 145,  # squat test video peaks at 128-137 deg
         "cue_under": "Bend a little more",
         "cue_over": "Don't go that far",
         "say_under": "Bend more",
@@ -156,8 +160,9 @@ EXERCISES = {
         "rest_angle": 15,
         "view": "side",
         "pick": "visible",
-        "default_min": 90,
-        "default_max": 150,
+        "vertical_a": True,
+        "default_min": 150,
+        "default_max": 180,  # shoulder test video raises the arm fully overhead (~177 deg)
         "cue_under": "Raise your arm a little higher",
         "cue_over": "Don't raise it that high",
         "say_under": "Higher",
@@ -174,6 +179,7 @@ EXERCISES = {
         "rest_angle": 15,
         "view": "front",
         "pick": "max",
+        "vertical_a": True,
         "default_min": 60,
         "default_max": 120,
         "cue_under": "Raise your arm a little higher",
@@ -193,8 +199,9 @@ EXERCISES = {
         "rest_angle": 10,
         "view": "side",
         "pick": "visible",
+        "anatomical_max": 150,  # filmed front-on the folded forearm reads ~175 deg; a real elbow stops ~150
         "default_min": 90,
-        "default_max": 140,
+        "default_max": 150,
         "cue_under": "Bend your elbow a little more",
         "cue_over": "Don't bend it that far",
         "say_under": "Bend more",
@@ -249,15 +256,25 @@ def measure(exercise_key, xy, conf, frame_w, frame_h):
     ex = get_exercise(exercise_key)
     candidates = []
     for side, (a, b, c) in ex["points"].items():
-        if not all(is_visible(xy, conf, i, frame_w, frame_h) for i in (a, b, c)):
+        if not all(is_visible(xy, conf, i, frame_w, frame_h) for i in (b, c)):
             continue
-        interior = joint_angle(xy[a], xy[b], xy[c])
+        if is_visible(xy, conf, a, frame_w, frame_h):
+            pa, score, real_a = xy[a], float(min(conf[a], conf[b], conf[c])), True
+        elif ex.get("vertical_a"):
+            pa, score, real_a = (xy[b][0], xy[b][1] + frame_h * 0.2), float(min(conf[b], conf[c])), False
+        else:
+            continue
+        interior = joint_angle(pa, xy[b], xy[c])
         angle = 180.0 - interior if ex["mode"] == "flexion" else interior
-        score = float(min(conf[a], conf[b], conf[c]))
-        candidates.append({"side": side, "angle": angle, "score": score, "points": (xy[a], xy[b], xy[c])})
+        if "anatomical_max" in ex:
+            angle = min(angle, ex["anatomical_max"])
+        candidates.append({"side": side, "angle": angle, "score": score, "points": (pa, xy[b], xy[c]), "real_a": real_a})
 
     if not candidates:
         return None
+    # a side measured from the real keypoint A beats one using the vertical stand-in
+    if any(c["real_a"] for c in candidates):
+        candidates = [c for c in candidates if c["real_a"]]
 
     if ex["pick"] == "max":
         if ex["direction"] == "up":

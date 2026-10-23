@@ -43,7 +43,7 @@ CONSENT_SECTIONS = [
 ]
 
 # Safety page content (also shown during sessions). Needs clinician review before release.
-EMERGENCY_NUMBER = "112"
+EMERGENCY_NUMBER = "108"
 RED_FLAGS = [
     "Chest pain or tightness",
     "Fainting, severe dizziness or shortness of breath",

@@ -7,9 +7,13 @@ import TherapistPending from "./pages/TherapistPending.jsx";
 import AcceptInvite from "./pages/AcceptInvite.jsx";
 import PrescriptionBuilder from "./pages/PrescriptionBuilder.jsx";
 import TherapistDashboard from "./pages/TherapistDashboard.jsx";
+import TherapistPatients from "./pages/TherapistPatients.jsx";
+import ExerciseLibrary from "./pages/ExerciseLibrary.jsx";
 import PatientDetail from "./pages/PatientDetail.jsx";
 import SessionReport from "./pages/SessionReport.jsx";
 import PatientHome from "./pages/PatientHome.jsx";
+import PatientPlan from "./pages/PatientPlan.jsx";
+import PatientSessions from "./pages/PatientSessions.jsx";
 import ConsentPage from "./pages/ConsentPage.jsx";
 import ExerciseSession from "./pages/ExerciseSession.jsx";
 import PatientSettings from "./pages/PatientSettings.jsx";
@@ -37,6 +41,18 @@ function Guard({ role, approved = true, children }) {
   return <Layout user={user}>{children}</Layout>;
 }
 
+// Public page; a logged-in user sees it inside the app shell so the menu stays
+function SafetyRoute() {
+  const user = getUser();
+  return user ? (
+    <Layout user={user}>
+      <SafetyPage embedded />
+    </Layout>
+  ) : (
+    <SafetyPage />
+  );
+}
+
 function HomeRedirect() {
   return <Navigate to={homeFor(getUser())} replace />;
 }
@@ -49,14 +65,18 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/invite/:token" element={<AcceptInvite />} />
-      <Route path="/safety" element={<SafetyPage />} />
+      <Route path="/safety" element={<SafetyRoute />} />
 
       <Route path="/therapist" element={page("THERAPIST", <TherapistDashboard />)} />
+      <Route path="/therapist/patients" element={page("THERAPIST", <TherapistPatients />)} />
+      <Route path="/therapist/exercises" element={page("THERAPIST", <ExerciseLibrary />)} />
       <Route path="/therapist/verification" element={page("THERAPIST", <TherapistPending />, false)} />
       <Route path="/therapist/patients/:id" element={page("THERAPIST", <PatientDetail />)} />
       <Route path="/therapist/patients/:id/plan/new" element={page("THERAPIST", <PrescriptionBuilder />)} />
       <Route path="/sessions/:id" element={page(null, <SessionReport />)} />
       <Route path="/patient" element={page("PATIENT", <PatientHome />)} />
+      <Route path="/patient/plan" element={page("PATIENT", <PatientPlan />)} />
+      <Route path="/patient/sessions" element={page("PATIENT", <PatientSessions />)} />
       <Route path="/patient/consent" element={page("PATIENT", <ConsentPage />, false)} />
       <Route path="/patient/session/:planId" element={page("PATIENT", <ExerciseSession />)} />
       <Route path="/patient/settings" element={page("PATIENT", <PatientSettings />)} />

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../../api.js";
 
-const ACTION_LABEL = {
+export const ACTION_LABEL = {
   THERAPIST_REGISTERED: "Therapist registered",
   THERAPIST_RESUBMITTED: "Verification resubmitted",
   THERAPIST_APPROVED: "Therapist approved",
@@ -11,15 +11,36 @@ const ACTION_LABEL = {
   USER_REACTIVATED: "Account reactivated",
   ADMIN_CREATED: "Admin created",
   PATIENT_CREATED: "Patient created",
+  PATIENT_INVITED: "Patient invited",
+  PATIENT_UPDATED: "Patient details updated",
+  INVITE_ACCEPTED: "Invitation accepted",
   PLAN_ASSIGNED: "Plan assigned",
+  PLAN_SAVED: "Plan saved",
+  PLAN_DRAFT_SAVED: "Plan draft saved",
+  PLAN_PAUSED: "Plan paused",
+  PLAN_RESUMED: "Plan resumed",
+  PLAN_ENDED: "Plan ended",
+  PLAN_DRAFT_DISCARDED: "Plan draft discarded",
+  CONSENT_AGREED: "Consent given (camera on)",
+  CONSENT_AGREED_NO_CAMERA: "Consent given (no camera)",
+  CONSENT_CAMERA_ALLOWED: "Camera allowed",
+  CONSENT_CAMERA_WITHDRAWN: "Camera withdrawn",
+  SESSIONS_CLEARED: "Session history cleared",
+  EMERGENCY_ALERT: "Emergency alert sent",
 };
 
-const ACTION_COLOR = {
+export const ACTION_COLOR = {
   THERAPIST_APPROVED: "green",
   USER_REACTIVATED: "green",
   THERAPIST_REJECTED: "red",
   USER_SUSPENDED: "red",
   CREDENTIAL_VIEWED: "amber",
+  SESSIONS_CLEARED: "amber",
+  PLAN_SAVED: "violet",
+  PATIENT_CREATED: "blue",
+  INVITE_ACCEPTED: "green",
+  CONSENT_CAMERA_WITHDRAWN: "amber",
+  EMERGENCY_ALERT: "red",
 };
 
 export default function AdminAudit() {

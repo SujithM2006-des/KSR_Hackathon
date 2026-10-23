@@ -49,7 +49,7 @@ export default function ConsentPage() {
             </section>
           ))}
           <p className="small">
-            Safety: stop if you feel sharp, worsening or unusual pain. In an emergency call 112.{" "}
+            Safety: stop if you feel sharp, worsening or unusual pain. In an emergency call 108.{" "}
             <Link to="/safety">Read the safety page</Link>
           </p>
           <p className="muted small">

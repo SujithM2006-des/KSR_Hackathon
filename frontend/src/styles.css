@@ -1,22 +1,27 @@
-/* ReHabRep - clinical, calm, readable */
+/* ReHabRep - calm violet clinical theme (see theme.css for the app shell and dashboards) */
 :root {
-  --bg: #f4f7f8;
+  --bg: #f5f6fc;
   --card: #ffffff;
-  --text: #13232c;
-  --muted: #5b6b75;
-  --line: #e2e8ec;
-  --primary: #0f766e;
-  --primary-dark: #0b5d57;
-  --primary-soft: #e6f4f2;
+  --text: #121735;
+  --muted: #5d6585;
+  --line: #e6e8f3;
+  --primary: #5b34ea;
+  --primary-dark: #4521c9;
+  --primary-soft: #efeafe;
+  --teal: #0d9488;
+  --teal-soft: #e3f6f3;
+  --blue: #2563eb;
+  --blue-soft: #e8efff;
   --green: #16a34a;
-  --green-soft: #e8f6ed;
+  --green-soft: #e7f7ec;
   --amber: #b45309;
   --amber-soft: #fdf3e2;
   --red: #dc2626;
   --red-soft: #fdecec;
-  --grey-soft: #eef1f3;
-  --radius: 12px;
-  --shadow: 0 1px 2px rgba(16, 35, 44, 0.06), 0 4px 16px rgba(16, 35, 44, 0.05);
+  --grey-soft: #eff1f7;
+  --navy: #0f1838;
+  --radius: 16px;
+  --shadow: 0 1px 2px rgba(18, 23, 53, 0.05), 0 8px 24px rgba(18, 23, 53, 0.06);
 }
 
 * {
@@ -273,7 +278,7 @@ code {
   border-bottom: none;
 }
 .table tbody tr:hover {
-  background: #fafcfc;
+  background: #fafaff;
 }
 .row-alert {
   background: var(--red-soft);
@@ -592,12 +597,8 @@ select:focus {
   text-align: center;
 }
 
-.source-box summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-.source-box input {
-  margin-top: 8px;
+.source-box {
+  margin: 8px 0 12px;
 }
 
 .chart {

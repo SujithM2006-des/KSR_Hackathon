@@ -5,7 +5,8 @@ Rules (also shown to patients and therapists in the app):
   - An exercise is SCHEDULED on a day when it belongs to the plan version that was live that day
     and that weekday is ticked in its schedule.
   - An exercise counts as DONE on a day when it has a COMPLETED session that day
-    (camera-tracked or patient-confirmed).
+    (camera-tracked or patient-confirmed). A session done under an earlier plan version still
+    counts for the same exercise (and side), so a therapist editing the plan never undoes the day.
   - STREAK = consecutive days on which every scheduled exercise was done. Days with nothing
     scheduled are ignored. Today only adds to the streak once it is complete; an unfinished
     today does not break it.
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from clock import local_today, utc_to_local
 from crud import current_prescription, get_sessions, list_prescriptions
+from models import ExercisePlan
 from serializers import days_label, parse_days, plan_out
 
 STREAK_RULE = (
@@ -72,13 +74,18 @@ def build_today(db: DbSession, patient_id: int) -> dict:
     prescriptions = list_prescriptions(db, patient_id)
     sessions = get_sessions(db, patient_id, limit=5000)
 
-    by_day = {}  # (date, plan_id) -> [sessions]
+    # the same exercise keeps its key across plan versions (each version has new item ids)
+    item_key = {
+        p.id: (p.exercise_type, p.side or "BOTH")
+        for p in db.query(ExercisePlan).filter(ExercisePlan.patient_id == patient_id).all()
+    }
+    by_day = {}  # (date, exercise key) -> [sessions]
     for s in sessions:
-        if s.ended_at:
-            by_day.setdefault((s.ended_at.date(), s.plan_id), []).append(s)
+        if s.ended_at and s.plan_id in item_key:
+            by_day.setdefault((s.ended_at.date(), item_key[s.plan_id]), []).append(s)
 
     def done_on(day, item_id):
-        return any(s.status == "COMPLETED" for s in by_day.get((day, item_id), []))
+        return any(s.status == "COMPLETED" for s in by_day.get((day, item_key.get(item_id)), []))
 
     # ---- today ----
     live = current_prescription(db, patient_id)
@@ -86,7 +93,7 @@ def build_today(db: DbSession, patient_id: int) -> dict:
     if live is not None and live.status == "ACTIVE":
         for it in live.items:
             info = plan_out(it)
-            todays = by_day.get((today, it.id), [])
+            todays = by_day.get((today, item_key.get(it.id)), [])
             info["today_status"] = day_status(todays)
             info["today_session_ids"] = [s.id for s in todays]
             (today_items if info["scheduled_today"] else other_items).append(info)

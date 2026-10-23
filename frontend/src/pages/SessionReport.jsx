@@ -21,6 +21,14 @@ const FLAG_TEXT = {
   PAIN_STOP: "Patient stopped the exercise because of pain.",
 };
 
+function fmtDuration(sec) {
+  const total = Math.round(sec);
+  if (total < 60) return `${total} s`;
+  const m = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest ? `${m} min ${rest} s` : `${m} min`;
+}
+
 export default function SessionReport() {
   const { id } = useParams();
   const user = getUser();
@@ -118,7 +126,7 @@ export default function SessionReport() {
             <span className="stat-label">Pain check-in</span>
           </div>
           <div className="stat">
-            <span className="stat-num">{s.duration_s ? `${Math.round(s.duration_s / 60)} min` : UNAVAILABLE}</span>
+            <span className="stat-num">{s.duration_s ? fmtDuration(s.duration_s) : UNAVAILABLE}</span>
             <span className="stat-label">Exercise time</span>
           </div>
         </div>
@@ -142,9 +150,9 @@ export default function SessionReport() {
               <div className="chart">
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                    <CartesianGrid stroke="#e8edf0" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#5b6b75" }} />
-                    <YAxis domain={[0, 180]} tick={{ fontSize: 12, fill: "#5b6b75" }} unit="°" />
+                    <CartesianGrid stroke="#eef0f7" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#5d6585" }} />
+                    <YAxis domain={[0, 180]} tick={{ fontSize: 12, fill: "#5d6585" }} unit="°" />
                     <ReferenceArea y1={s.min_angle} y2={s.max_angle} fill="#16a34a" fillOpacity={0.1} stroke="#16a34a" strokeOpacity={0.3} />
                     <Tooltip
                       formatter={(v, n, p) => [`${fmtNum(v, 1)}° (${p.payload.result})`, "Angle"]}

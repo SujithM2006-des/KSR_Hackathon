@@ -77,12 +77,22 @@ export default function AdminPatients() {
                         <AccountBadge status={p.account_status} />
                       </td>
                       <td className="right">
-                        <button
-                          className={`btn btn-sm ${suspended ? "btn-outline" : "btn-ghost"}`}
-                          onClick={() => setDialog({ suspend: !suspended, id: p.user_id, name: p.name })}
-                        >
-                          {suspended ? "Reactivate" : "Suspend"}
-                        </button>
+                        <div className="row-gap right">
+                          {p.sessions_count > 0 && (
+                            <button
+                              className="btn btn-sm btn-ghost"
+                              onClick={() => setDialog({ clear: true, id: p.id, name: p.name, count: p.sessions_count })}
+                            >
+                              Clear sessions
+                            </button>
+                          )}
+                          <button
+                            className={`btn btn-sm ${suspended ? "btn-outline" : "btn-ghost"}`}
+                            onClick={() => setDialog({ suspend: !suspended, id: p.user_id, name: p.name })}
+                          >
+                            {suspended ? "Reactivate" : "Suspend"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -93,7 +103,17 @@ export default function AdminPatients() {
         </div>
       ))}
 
-      {dialog && (
+      {dialog && dialog.clear && (
+        <ReasonDialog
+          title={`Clear session history of ${dialog.name}?`}
+          text={`This permanently deletes all ${dialog.count} session(s), their reps, pain scores and review flags. The account, plan and consent stay. This cannot be undone.`}
+          confirmLabel="Delete sessions"
+          danger
+          onConfirm={(reason) => api.adminClearSessions(dialog.id, reason).then(load)}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog && !dialog.clear && (
         <ReasonDialog
           title={`${dialog.suspend ? "Suspend" : "Reactivate"} ${dialog.name}?`}
           confirmLabel={dialog.suspend ? "Suspend account" : "Reactivate account"}

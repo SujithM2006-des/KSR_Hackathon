@@ -17,9 +17,10 @@ export function ResultBadge({ result }) {
   return <span className={`badge badge-${cls}`}>{result}</span>;
 }
 
-export function FollowedBadge({ value }) {
+// `short` = just the value, for table columns already headed "Plan followed"
+export function FollowedBadge({ value, short = false }) {
   const cls = { YES: "green", PARTLY: "amber", NO: "red" }[value] || "grey";
-  return <span className={`badge badge-${cls}`}>{value}</span>;
+  return <span className={`badge badge-${cls}`}>{short ? value : `Plan followed: ${value}`}</span>;
 }
 
 export function PainBadge({ score }) {

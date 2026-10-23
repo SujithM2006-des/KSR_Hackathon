@@ -55,11 +55,14 @@ const live = {
   // patient
   myPlans: () => request("GET", "/my/plans").then(mapList(mapPlan)),
   mySessions: () => request("GET", "/my/sessions").then(mapList(mapSession)),
-  startSession: (planId, source) =>
-    request("POST", "/my/sessions/start", { json: { plan_id: planId, source: source || null } }),
+  sessionInput: (planId) => request("GET", `/my/sessions/input?plan_id=${encodeURIComponent(planId)}`),
+  startSession: (planId, useCamera = false) =>
+    request("POST", "/my/sessions/start", { json: { plan_id: planId, use_camera: useCamera } }),
   setPain: (sessionId, pain, note) =>
     request("PATCH", `/sessions/${sessionId}/pain`, { json: { pain_score: pain, note: note || null } }).then(mapSession),
   today: () => request("GET", "/me/today"),
+  emergencyAlertInfo: () => request("GET", "/me/emergency-alert"),
+  emergencyAlert: () => request("POST", "/me/emergency-alert"),
   myConsent: () => request("GET", "/me/consent"),
   giveConsent: (version, cameraAllowed) =>
     request("POST", "/me/consent", { json: { version, camera_allowed: cameraAllowed } }).then(mapUser),
@@ -80,6 +83,8 @@ const live = {
       json: { decision, reason, register_check_note: registerCheckNote || null },
     }).then(mapTherapist),
   adminPatients: () => request("GET", "/admin/patients"),
+  adminClearSessions: (patientId, reason) =>
+    request("POST", `/admin/patients/${patientId}/clear-sessions`, { json: { reason } }),
   adminSetStatus: (userId, suspend, reason) =>
     request("POST", `/admin/users/${userId}/${suspend ? "suspend" : "reactivate"}`, { json: { reason } }),
   adminAdmins: () => request("GET", "/admin/admins"),

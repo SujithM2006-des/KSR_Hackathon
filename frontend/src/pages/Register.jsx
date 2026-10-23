@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api.js";
+import { Logo } from "../components/Icons.jsx";
 
 const EMPTY = {
   name: "",
@@ -76,6 +77,9 @@ export default function Register() {
     <div className="register-page">
       <form className="card form-grid register-card" onSubmit={submit}>
         <div className="span-2">
+          <div className="card-logo">
+            <Logo />
+          </div>
           <Link to="/login" className="back">
             ← Back to log in
           </Link>

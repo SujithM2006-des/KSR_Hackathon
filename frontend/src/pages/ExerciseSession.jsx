@@ -29,7 +29,7 @@ export default function ExerciseSession() {
   const [error, setError] = useState("");
   const [stage, setStage] = useState("check");
   const [notWell, setNotWell] = useState(null); // reason text while the "not well" form is open
-  const [source, setSource] = useState("");
+  const [input, setInput] = useState(null); // { mode: "video" | "camera", video, available }
 
   // guided state
   const [setsDone, setSetsDone] = useState(0);
@@ -58,6 +58,10 @@ export default function ExerciseSession() {
         setItem(found || null);
       })
       .catch((e) => setError(e.message));
+    api
+      .sessionInput(planId)
+      .then(setInput)
+      .catch(() => setInput(null));
     return () => clearInterval(pollRef.current);
   }, [planId]);
 
@@ -83,12 +87,13 @@ export default function ExerciseSession() {
   }
 
   // ---------- with the camera ----------
-  async function startCamera() {
+  // useCamera: live webcam even when test videos are the default input
+  async function startCamera(useCamera = false) {
     setError("");
     try {
       const current = await api.mySessions();
       lastIdRef.current = current.length ? Math.max(...current.map((s) => s.id)) : 0;
-      await api.startSession(item.id, source.trim() || null);
+      await api.startSession(item.id, useCamera);
       setStage("tracked");
       clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
@@ -219,7 +224,7 @@ export default function ExerciseSession() {
           ) : (
             <form className="stack" onSubmit={sendNotWell}>
               <div className="alert alert-amber">
-                If you have chest pain, fainting, sudden severe pain, new numbness or a fall, stop and call <b>112</b> or
+                If you have chest pain, fainting, sudden severe pain, new numbness or a fall, stop and call <b>108</b> or
                 see a doctor now.
               </div>
               <label>
@@ -249,16 +254,31 @@ export default function ExerciseSession() {
                   {item.view === "side" ? "side-on to" : "facing"} the camera with the{" "}
                   {item.joint ? item.joint.toLowerCase() : "body part"} clearly visible, in good light.
                 </p>
-                <details className="source-box">
-                  <summary>Video source (for the demo)</summary>
-                  <p className="muted small">
-                    Empty = demo video <code>videos\squat_test.mp4</code>. Type <code>0</code> for the webcam.
-                  </p>
-                  <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="videos\squat_test.mp4" />
-                </details>
-                <button className="btn btn-primary btn-lg btn-block" onClick={startCamera}>
-                  Start with camera
-                </button>
+                {input && input.mode === "video" ? (
+                  <>
+                    <button className="btn btn-primary btn-lg btn-block" onClick={() => startCamera(true)}>
+                      Start with my camera
+                    </button>
+                    <p className="source-box muted small">
+                      {input.available ? (
+                        <>
+                          Or test with the recorded video <code>{input.video}</code> instead of the live camera.
+                        </>
+                      ) : (
+                        <>There is no recorded test video for this exercise yet.</>
+                      )}
+                    </p>
+                    {input.available && (
+                      <button className="btn btn-outline btn-lg btn-block" onClick={() => startCamera(false)}>
+                        Start with test video
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <button className="btn btn-primary btn-lg btn-block" onClick={() => startCamera(false)}>
+                    Start with camera
+                  </button>
+                )}
               </>
             ) : (
               <p className="muted">
@@ -356,7 +376,7 @@ export default function ExerciseSession() {
           <h3>Stop the exercise</h3>
           <p>
             Stop if the pain is sharp, getting worse or unusual. Rest, and tell your therapist. If it is severe, or you
-            have chest pain, fainting or numbness, call <b>112</b> or go to the nearest hospital.
+            have chest pain, fainting or numbness, call <b>108</b> or go to the nearest hospital.
           </p>
           <p className="muted small">The app does not judge what the pain means - your therapist will review it.</p>
           <div className="row-gap">
@@ -430,7 +450,7 @@ export default function ExerciseSession() {
           )}
           {session.high_pain && (
             <div className="alert alert-red">
-              You reported high pain. Please rest and contact your therapist. If it is severe, call 112.
+              You reported high pain. Please rest and contact your therapist. If it is severe, call 108.
             </div>
           )}
           <div className="row-gap">

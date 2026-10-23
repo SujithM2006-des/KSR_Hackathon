@@ -26,6 +26,7 @@ THERAPIST (verified only)
 
 PATIENT
   GET   /my/plans                        active plan items (with days, time, side, scheduled_today)
+  GET   /my/sessions/input?plan_id=     test video or live camera for that exercise
   POST  /my/sessions/start               opens the camera exercise window (needs camera consent)
   GET   /my/sessions                     my past sessions
   PATCH /sessions/{id}/pain              pain check-in (0-10) + optional note after a session
@@ -55,15 +56,34 @@ from security import current_user, make_token, require_patient, require_therapis
 from serializers import exercise_info, patient_summary, plan_out, session_out
 
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DEMO_VIDEO = os.path.join("videos", "squat_test.mp4")
+# Default input for a tracked session. "video" plays the recorded test video for the exercise
+# (for testing/demo); "camera" uses the live webcam. Switch with REHABREP_INPUT=camera.
+# In video mode the patient can still pick the live webcam per session (StartIn.use_camera).
+INPUT_MODE = os.getenv("REHABREP_INPUT", "video").strip().lower()
+CAMERA_INDEX = os.getenv("REHABREP_CAMERA_INDEX", "0")
+TEST_VIDEOS = {  # exercise key -> recorded test video in videos/
+    "mini_squat": "squat_test.mp4",
+    "seated_knee_extension": "knee_ext_1.mp4",
+    "seated_knee_flexion": "knee_flex_1.mp4",
+    "hamstring_curl": "ham_curl_1.mp4",
+    "hip_flexion": "hip_flex_1.mp4",
+    "hip_abduction": "hip_abd_1.mp4",
+    "shoulder_flexion": "shoulder_flex_1.mp4",
+    "shoulder_abduction": "shoulder_abd_1.mp4",
+    "elbow_flexion": "elbow_flex_1.mp4",
+}
 FRONTEND_ORIGINS = os.getenv(
     "REHABREP_FRONTEND_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
 ).split(",")
+# The frontend opened from a phone on the same private network (home Wi-Fi or the laptop's hotspot,
+# e.g. http://192.168.137.1:5173). Private address ranges only - never public internet addresses.
+LAN_ORIGIN_REGEX = r"http://(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+):5173"
 
 app = FastAPI(title="ReHabRep API", version="1.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in FRONTEND_ORIGINS if o.strip()],
+    allow_origin_regex=LAN_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,7 +109,7 @@ class LoginIn(BaseModel):
 
 class StartIn(BaseModel):
     plan_id: int
-    source: Optional[str] = None  # video path or webcam index; default = demo video
+    use_camera: bool = False  # True = live webcam even while test videos are the default
 
 
 class PainIn(BaseModel):
@@ -206,12 +226,33 @@ def my_sessions(user: User = Depends(require_patient), db: DbSession = Depends(g
     return [session_out(s) for s in get_sessions(db, user.patient_profile.id)]
 
 
+def session_input(plan, use_camera=False):
+    """Where the tracked session reads frames from: {"mode", "source", "video", "available"}."""
+    if INPUT_MODE == "camera" or use_camera:
+        return {"mode": "camera", "source": CAMERA_INDEX, "video": None, "available": True}
+    video = TEST_VIDEOS.get(plan.exercise_type)
+    source = os.path.join("videos", video) if video else None
+    available = bool(source) and os.path.isfile(os.path.join(PROJECT_ROOT, source))
+    return {"mode": "video", "source": source, "video": video, "available": available}
+
+
+def _my_active_plan(plan_id, user, db):
+    plan = next((p for p in get_active_plans(db, user.patient_profile.id) if p.id == plan_id), None)
+    if plan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found")
+    return plan
+
+
+@app.get("/my/sessions/input")
+def my_session_input(plan_id: int, user: User = Depends(require_patient), db: DbSession = Depends(get_db)):
+    info = session_input(_my_active_plan(plan_id, user, db))
+    return {k: info[k] for k in ("mode", "video", "available")}
+
+
 @app.post("/my/sessions/start")
 def start_session(body: StartIn, user: User = Depends(require_patient), db: DbSession = Depends(get_db)):
     """Opens the ReHabRep exercise window on this computer for the chosen plan."""
-    plans = {p.id for p in get_active_plans(db, user.patient_profile.id)}
-    if body.plan_id not in plans:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found")
+    plan = _my_active_plan(body.plan_id, user, db)
     consent = latest_consent(db, user.id)
     if consent is None or not consent.camera_allowed:
         raise HTTPException(
@@ -219,9 +260,13 @@ def start_session(body: StartIn, user: User = Depends(require_patient), db: DbSe
             "Camera use is not allowed in your consent settings. Use 'Do it without camera' or allow the camera in Settings.",
         )
 
-    source = body.source or DEFAULT_DEMO_VIDEO
-    if not source.isdigit() and not os.path.isfile(os.path.join(PROJECT_ROOT, source)) and not os.path.isfile(source):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Video not found: {source}")
+    info = session_input(plan, use_camera=body.use_camera)
+    if not info["available"]:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "There is no test video for this exercise yet. Use 'Do it without camera' for now.",
+        )
+    source = info["source"]
 
     cmd = [
         sys.executable,
@@ -231,7 +276,7 @@ def start_session(body: StartIn, user: User = Depends(require_patient), db: DbSe
     ]
     # stdin=DEVNULL: no terminal pain question - the web page asks instead
     proc = subprocess.Popen(cmd, cwd=PROJECT_ROOT, stdin=subprocess.DEVNULL)
-    return {"started": True, "pid": proc.pid, "source": source, "started_at": datetime.now().isoformat()}
+    return {"started": True, "pid": proc.pid, "mode": info["mode"], "started_at": datetime.now().isoformat()}
 
 
 @app.patch("/sessions/{session_id}/pain")

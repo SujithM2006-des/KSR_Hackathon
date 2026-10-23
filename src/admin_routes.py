@@ -7,6 +7,7 @@ ReHabRep - Admin API (all routes require role ADMIN).
   GET   /admin/therapists/{user_id}/document    the credential document (decrypted, admins only)
   POST  /admin/therapists/{user_id}/decision    APPROVE or REJECT, with a required reason
   GET   /admin/patients                         patients grouped under their therapist
+  POST  /admin/patients/{patient_id}/clear-sessions   delete a patient's session history (e.g. fresh demo)
   POST  /admin/users/{user_id}/suspend          suspend an account (reason required)
   POST  /admin/users/{user_id}/reactivate       reactivate an account (reason required)
   GET   /admin/admins                           list admins
@@ -189,6 +190,20 @@ def patients_by_therapist(admin: User = Depends(require_admin), db: DbSession = 
             }
         )
     return groups
+
+
+@router.post("/patients/{patient_id}/clear-sessions")
+def clear_sessions(patient_id: int, body: ReasonIn, admin: User = Depends(require_admin), db: DbSession = Depends(get_db)):
+    """Delete every session (and its reps) of one patient. Account, plans and consent are kept."""
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if patient is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Patient not found")
+    sessions = db.query(Session).filter(Session.patient_id == patient.id).all()
+    for s in sessions:
+        db.delete(s)  # rep logs go with it (cascade)
+    db.commit()
+    log_action(db, admin.id, "SESSIONS_CLEARED", "PATIENT", patient.id, f"{len(sessions)} session(s): {body.reason.strip()}")
+    return {"patient_id": patient.id, "deleted": len(sessions)}
 
 
 def _set_status(db: DbSession, admin: User, user_id: int, new_status: str, reason: str):

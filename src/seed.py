@@ -10,7 +10,7 @@ Creates (only if missing):
   Therapist APPROVED : therapist@rehabrep.demo / therapist123
   Therapist PENDING  : pending.therapist@rehabrep.demo / pending123   (to demo the verification queue)
   Patient            : patient@rehabrep.demo / patient123
-  Plan               : Knee bend, 1 set x 8 reps, range 90-135 deg (matches the squat test video)
+  Plan               : Knee bend, 1 set x 8 reps, range 90-145 deg (matches the squat test video)
 
 All of this is SYNTHETIC DEMO DATA - not real people, not real credentials.
 """
@@ -156,7 +156,7 @@ def main():
             plan = plans[0]
             print("Active plan exists")
         else:
-            plan = create_plan(db, patient.id, "mini_squat", sets=1, reps_per_set=8, min_angle=90, max_angle=135)
+            plan = create_plan(db, patient.id, "mini_squat", sets=1, reps_per_set=8, min_angle=90, max_angle=145)
             print("Created plan")
 
         print("\n----------------------------------------------")

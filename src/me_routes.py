@@ -12,6 +12,8 @@ PATIENT
   GET   /me/today                    today's exercises, plan status, streak, 7-day adherence
   POST  /my/sessions/guided          finish an exercise WITHOUT the camera (patient-confirmed)
   POST  /my/sessions/skip            skip today (optional reason; "not well" flags it for the therapist)
+  GET   /me/emergency-alert          is an emergency contact set up (masked number)
+  POST  /me/emergency-alert          call + SMS the emergency contact (see alerts.py)
 
 Patients never change prescriptions here - there is no route for it.
 """
@@ -22,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
+import alerts
 from clock import iso_utc
 from consent import CONSENT_SECTIONS, CONSENT_VERSION, EMERGENCY_NUMBER, RED_FLAGS
 from crud import (
@@ -176,3 +179,22 @@ def skip_today(body: SkipIn, user: User = Depends(require_patient), db: DbSessio
 @router.get("/rules")
 def rules():
     return {"streak": STREAK_RULE, "adherence": ADHERENCE_RULE}
+
+# ---------------------------------------------------------------------------
+# Emergency alert (call + SMS to the emergency contact, via Twilio)
+# ---------------------------------------------------------------------------
+@router.get("/me/emergency-alert")
+def emergency_alert_info(user: User = Depends(require_patient)):
+    s = alerts.settings()
+    return {"configured": alerts.configured(s), "to": alerts.masked(s["to"]) if alerts.configured(s) else None}
+
+
+@router.post("/me/emergency-alert")
+def emergency_alert(user: User = Depends(require_patient), db: DbSession = Depends(get_db)):
+    result = alerts.send_emergency_alert(user.id, user.name)
+    if result.get("configured") and not result.get("cooldown"):
+        log_action(
+            db, user.id, "EMERGENCY_ALERT", "USER", user.id,
+            f"call {result.get('call')}, sms {result.get('sms')} to {result.get('to')}",
+        )
+    return result

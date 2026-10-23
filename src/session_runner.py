@@ -347,6 +347,10 @@ def main():
         while True:
             if not paused:
                 ok, frame = cap.read()
+                if not ok and is_video and frame_no > 0 and not session_done:
+                    # test video: start again so short clips can fill the whole session
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ok, frame = cap.read()
                 if not ok:
                     if is_video:
                         print("End of video.")

@@ -53,7 +53,7 @@ def test_public_consent_and_safety(client):
     c = client.get("/consent").json()
     assert c["version"] and len(c["sections"]) >= 4
     s = client.get("/safety").json()
-    assert s["emergency_number"] == "112" and s["red_flags"]
+    assert s["emergency_number"] == "108" and s["red_flags"]
 
 
 def test_consent_required_for_camera(client):
@@ -181,3 +181,22 @@ def test_camera_session_saved_by_runner_counts_as_done(client):
     status = {i["exercise_type"]: i["today_status"] for i in client.get("/me/today", headers=ph).json()["items"]}
     assert status["mini_squat"] == "DONE"
     assert len(client.get(f"/patients/{pid}/trend", headers=th).json()) == 1
+
+def test_plan_edit_keeps_todays_progress(client):
+    th, ph, user, pid = new_patient_with_plan(client, "p4edit@x.com")
+    version = client.get("/consent").json()["version"]
+    client.post("/me/consent", json={"version": version, "camera_allowed": False}, headers=ph)
+    squat = next(i for i in client.get("/me/today", headers=ph).json()["items"] if i["exercise_type"] == "mini_squat")
+    client.post("/my/sessions/guided", json={"plan_id": squat["id"], "sets_done": 2, "client_request_id": rid()}, headers=ph)
+
+    # therapist changes the squat range -> new plan version with new item ids
+    items = [
+        {"exercise_type": "mini_squat", "sets": 2, "reps_per_set": 5, "min_angle": 70, "max_angle": 110},
+        {"exercise_type": "elbow_flexion", "sets": 1, "reps_per_set": 10, "min_angle": 90, "max_angle": 140},
+    ]
+    assert client.post(f"/patients/{pid}/exercise-plans", json={"items": items}, headers=th).status_code == 201
+
+    today = client.get("/me/today", headers=ph).json()
+    new_squat = next(i for i in today["items"] if i["exercise_type"] == "mini_squat")
+    assert new_squat["id"] != squat["id"]
+    assert new_squat["today_status"] == "DONE"  # still done after the edit
