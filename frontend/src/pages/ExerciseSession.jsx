@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, getUser, newRequestId } from "../api.js";
+import { api, getUser, newRequestId, updateUser } from "../api.js";
 import { FollowedBadge, ModeBadge, SessionStatusBadge } from "../components/Badge.jsx";
 import SafetyNote from "../components/SafetyNote.jsx";
 import { Icon } from "../components/Icons.jsx";
@@ -17,7 +17,10 @@ const ZONE_CLASS = { GOOD: "ok", UNDER: "warn", OVER: "bad" };
 
 // Live video + numbers from the session runner (session_runner.py --stream-port)
 function LiveSession({ stream, item, onStop }) {
-  const base = `${window.location.protocol}//${window.location.hostname}:${stream.port}`;
+  // The runner binds to IPv4 loopback by default. On this machine, localhost
+  // resolves to ::1 first, where nothing is listening.
+  const streamHost = window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname;
+  const base = `${window.location.protocol}//${streamHost}:${stream.port}`;
   const q = `t=${encodeURIComponent(stream.token)}`;
   const [st, setSt] = useState({ phase: "loading" });
   const [stopping, setStopping] = useState(false);
@@ -126,7 +129,7 @@ function LiveSession({ stream, item, onStop }) {
 export default function ExerciseSession() {
   const { planId } = useParams();
   const navigate = useNavigate();
-  const user = getUser();
+  const [user, setUser] = useState(getUser);
   const cameraAllowed = Boolean(user && user.consent && user.consent.camera_allowed);
 
   const [item, setItem] = useState(null);
@@ -159,6 +162,14 @@ export default function ExerciseSession() {
       .sessionInput(planId)
       .then(setInput)
       .catch(() => setInput(null));
+    // the saved copy can be stale (consent changed elsewhere, database reset) - the server decides camera use
+    api
+      .me()
+      .then((u) => {
+        updateUser(u);
+        setUser(u);
+      })
+      .catch(() => {});
     return () => clearInterval(pollRef.current);
   }, [planId]);
 

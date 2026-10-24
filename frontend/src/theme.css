@@ -292,6 +292,8 @@ h2 {
   display: flex;
   flex-direction: column;
   line-height: 1.2;
+  color: inherit;
+  text-decoration: none;
 }
 .appbar-who b {
   font-size: 14.5px;
@@ -299,6 +301,86 @@ h2 {
 .appbar-who span {
   font-size: 12.5px;
   color: var(--muted);
+}
+
+.profile-tabs { display: flex; gap: 28px; border-bottom: 1px solid var(--navy); margin: 20px 0; overflow-x: auto; }
+.profile-tab { display: inline-flex; align-items: center; gap: 9px; padding: 0 10px 13px; color: var(--muted); text-decoration: none; white-space: nowrap; border-bottom: 2px solid transparent; }
+.profile-tab:hover, .profile-tab.active { color: var(--text); }
+.profile-tab.active { border-color: var(--primary); font-weight: 700; }
+.profile-hero { overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: #fff; box-shadow: var(--shadow); }
+.profile-cover { height: 120px; background: linear-gradient(105deg, #101c39 0%, #173b83 52%, #1760ec 100%); }
+.profile-identity { min-height: 100px; display: flex; align-items: center; gap: 18px; padding: 0 24px 18px; }
+.profile-identity > .avatar { width: 92px !important; height: 92px !important; font-size: 34px !important; border: 5px solid #fff; border-radius: 20px; margin-top: -36px; box-shadow: 0 6px 18px rgba(17, 24, 39, .14); }
+.profile-identity-copy { min-width: 0; padding-top: 12px; }
+.profile-identity-copy h2 { margin: 0 0 6px; font-size: 23px; }
+.profile-role { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.profile-role .icon { color: var(--primary); }
+.profile-settings-link { margin-left: auto; flex: none; }
+.profile-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
+.profile-stat { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 18px; }
+.profile-stat .icon-tile { width: 46px; height: 46px; flex: none; }
+.profile-stat > div { display: grid; gap: 5px; min-width: 0; }
+.profile-stat > div span { color: var(--muted); font-size: 13px; }
+.profile-stat > div b { font-size: 21px; line-height: 1.2; overflow-wrap: anywhere; }
+.profile-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr); gap: 16px; }
+.profile-details-card, .profile-quick-card { padding: 22px; }
+.profile-details-card h3, .profile-quick-card h3 { margin: 0 0 18px; }
+.profile-details-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; margin: 0; }
+.profile-details-list > div { min-width: 0; }
+.profile-details-list dt { color: var(--muted); font-size: 13px; margin-bottom: 5px; }
+.profile-details-list dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.profile-quick-actions { display: grid; gap: 9px; }
+.profile-quick-actions a { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); text-decoration: none; font-weight: 600; }
+.profile-quick-actions a:hover { border-color: var(--primary); background: var(--primary-soft); }
+.profile-quick-actions a .icon:last-child { margin-left: auto; color: var(--muted); }
+.profile-quick-actions a .icon:first-child { color: var(--primary); }
+.doctor-sheet { margin-top: 20px; }
+.doctor-sheet .card-head { align-items: flex-start; }
+.doctor-sheet .card-head h2 { margin: 0; font-size: 20px; }
+.doctor-sheet .card-head p { margin: 6px 0 0; }
+.mark-patient-select { display: grid; gap: 8px; max-width: 440px; margin-top: 18px; }
+.mark-patient-select select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+}
+.mark-actions { align-items: center; justify-content: space-between; margin-top: 18px; }
+.mark-sheet { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
+.mark-sheet-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.mark-sheet-heading h2 { margin: 0; }
+.mark-sheet-heading p { margin: 0 0 4px; }
+.mark-sheet-person { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 18px 0; }
+.mark-sheet-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.mark-sheet-note { margin-top: 16px; }
+@media print {
+  @page { margin: 14mm; }
+  body * { visibility: hidden !important; }
+  .print-area, .print-area * { visibility: visible !important; }
+  .print-area { position: absolute; inset: 0; width: 100%; margin: 0; padding: 0; border: 0; color: #111; }
+  .no-print { display: none !important; }
+  .mark-sheet-stats { grid-template-columns: repeat(5, 1fr); }
+  .mark-sheet .table { font-size: 10pt; }
+  .mark-sheet .table th, .mark-sheet .table td { padding: 6px 4px; }
+}
+@media (max-width: 800px) {
+  .profile-columns { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .profile-identity { align-items: flex-start; flex-wrap: wrap; padding: 0 16px 16px; gap: 10px 14px; }
+  .profile-identity > .avatar { width: 76px !important; height: 76px !important; font-size: 29px !important; margin-top: -28px; }
+  .profile-identity-copy { padding-top: 4px; }
+  .profile-identity-copy h2 { font-size: 20px; }
+  .profile-settings-link { margin-left: 0; }
+  .profile-stats { grid-template-columns: 1fr; gap: 10px; }
+  .profile-details-list { grid-template-columns: 1fr; gap: 14px; }
+  .profile-details-card, .profile-quick-card { padding: 18px; }
+  .mark-sheet-heading { align-items: flex-start; flex-direction: column; }
+  .mark-sheet-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .shell .content {
   max-width: 1440px;

@@ -111,10 +111,10 @@ export default function Layout({ user, children }) {
           </span>
           <div className="appbar-user">
             <Avatar name={user.name} />
-            <span className="appbar-who">
+            <Link to="/profile" className="appbar-who">
               <b>{user.name}</b>
               <span>{roleLabel(user)}</span>
-            </span>
+            </Link>
             <button className="icon-btn" onClick={handleLogout} title="Log out" aria-label="Log out">
               <Icon name="logout" />
             </button>

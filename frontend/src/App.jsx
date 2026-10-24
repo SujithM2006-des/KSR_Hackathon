@@ -17,6 +17,7 @@ import PatientSessions from "./pages/PatientSessions.jsx";
 import ConsentPage from "./pages/ConsentPage.jsx";
 import ExerciseSession from "./pages/ExerciseSession.jsx";
 import PatientSettings from "./pages/PatientSettings.jsx";
+import Profile from "./pages/Profile.jsx";
 import SafetyPage from "./pages/SafetyPage.jsx";
 import AdminOverview from "./pages/admin/AdminOverview.jsx";
 import AdminTherapists from "./pages/admin/AdminTherapists.jsx";
@@ -66,6 +67,7 @@ export default function App() {
       <Route path="/register" element={<Register />} />
       <Route path="/invite/:token" element={<AcceptInvite />} />
       <Route path="/safety" element={<SafetyRoute />} />
+      <Route path="/profile" element={page(null, <Profile />, false)} />
 
       <Route path="/therapist" element={page("THERAPIST", <TherapistDashboard />)} />
       <Route path="/therapist/patients" element={page("THERAPIST", <TherapistPatients />)} />
